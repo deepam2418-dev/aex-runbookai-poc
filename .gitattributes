@@ -1,0 +1,156 @@
+# ----------------------------------------
+# Enterprise .gitattributes
+# Covers Oracle APEX, Salesforce APEX, .NET, JavaScript, C#, C/C++, Java, Python, Go, PHP, SQL, Ruby, Terraform, Bicep, PL/SQL
+# ----------------------------------------
+
+# ----------------------------
+# Default: treat text files as LF-normalized
+# ----------------------------
+* text=auto eol=lf
+
+# Explicitly treat common script types as text and LF
+*.sh     text eol=lf
+*.bash   text eol=lf
+*.ps1    text eol=lf linguist-language=PowerShell
+
+# Makefile and batch files
+Makefile text eol=lf
+*.bat    text eol=crlf
+
+# ----------------------------
+# Linguist language hints (improves GitHub language stats)
+# ----------------------------
+*.bicep        linguist-language=Bicep
+*.tf           linguist-language=HCL
+*.tfvars       linguist-language=HCL
+*.hcl          linguist-language=HCL
+*.py           linguist-language=Python
+*.js           linguist-language=JavaScript
+*.mjs          linguist-language=JavaScript
+*.c            linguist-language=C
+*.h            linguist-language=C
+*.cpp          linguist-language=C++
+*.hpp          linguist-language=C++
+*.cs           linguist-language=C#
+*.java         linguist-language=Java
+*.go           linguist-language=Go
+*.php          linguist-language=PHP
+*.rb           linguist-language=Ruby
+*.sql          linguist-language=SQL
+*.plsql        linguist-language=SQL
+*.cls          linguist-language=Apex
+*.trigger      linguist-language=Apex
+*.apexxml      linguist-language=XML
+*.apk?         linguist-language=Java
+
+# Salesforce / Oracle / PL-SQL related files
+# (treat XML metadata and descriptor files as text)
+*.xml          text
+*-meta.xml     text
+
+# ----------------------------
+# Binary files (do not attempt to convert or trim)
+# ----------------------------
+# Images
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.svg    binary
+
+# Archives & binaries
+*.zip    binary
+*.tar    binary
+*.gz     binary
+*.jar    binary
+*.war    binary
+*.exe    binary
+*.dll    binary
+
+# Media
+*.mp4    binary
+*.mov    binary
+*.mp3    binary
+
+# ----------------------------
+# Generated / vendor files (exclude from language stats and mark as generated)
+# ----------------------------
+# Node / JS
+node_modules/** linguist-vendored
+dist/**          linguist-generated
+build/**         linguist-generated
+.next/**         linguist-generated
+out/**           linguist-generated
+.turbo/**        linguist-generated
+
+# Python virtualenvs & caches
+.venv/**         linguist-generated
+venv/**          linguist-generated
+__pycache__/**   linguist-generated
+*.pyc            linguist-generated
+
+# Terraform/Bicep state and caches
+.terraform/**    linguist-vendored
+*.tfstate        linguist-generated
+*.tfstate.*      linguist-generated
+*.backup         linguist-generated
+
+# Protobuf generated files (language-specific generated artifacts)
+*.pb.go          linguist-generated
+*.pb.cc          linguist-generated
+*.pb.h           linguist-generated
+
+# Lockfiles preserved as text but excluded from language stats if desired
+package-lock.json linguist-generated
+yarn.lock        linguist-generated
+pnpm-lock.yaml   linguist-generated
+poetry.lock      linguist-generated
+
+# Vendor dirs for compiled languages
+vendor/**        linguist-vendored
+third_party/**   linguist-vendored
+
+# ----------------------------
+# Export and packaging hints
+# ----------------------------
+# Exclude IDE/editor settings and local env files from archives
+/.idea/           export-ignore
+/.vscode/         export-ignore
+*.code-workspace  export-ignore
+.env             export-ignore
+.env.*           export-ignore
+*.local          export-ignore
+*.local.*        export-ignore
+
+# CI artifacts, build caches and test output
+/coverage/**      export-ignore
+/.nyc_output/**   export-ignore
+/test-results/**  export-ignore
+/reports/**       export-ignore
+/dist/**          export-ignore
+/build/**         export-ignore
+/.cache/**        export-ignore
+/tmp/**           export-ignore
+
+# Documentation sources that shouldn't be in release archives (but keep docs/)
+*.docgen/**       export-ignore
+
+# ----------------------------
+# Text/Binary & diff hints for specific files
+# ----------------------------
+# Keep lockfiles as text to ease diffs and merges
+package-lock.json text eol=lf
+yarn.lock text eol=lf
+pnpm-lock.yaml text eol=lf
+poetry.lock text eol=lf
+
+# Force text for common config files
+*.yml               text eol=lf
+*.yaml              text eol=lf
+*.json              text eol=lf
+*.md                text eol=lf
+
+# Improve merges on certain generated files (avoid conflicts by preferring union)
+# *.gitattributes merge=union
+# *.gitignore merge=union
