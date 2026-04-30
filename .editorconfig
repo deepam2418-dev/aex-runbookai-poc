@@ -1,0 +1,194 @@
+# ----------------------------------------
+# Enterprise .editorconfig
+# Covers Oracle APEX, Salesforce APEX, .NET, JavaScript, C#, C/C++, Java, Python, Go, PHP, SQL, Ruby, Terraform, Bicep, PL/SQL
+# ----------------------------------------
+
+# top-most editorconfig file
+root = true
+
+##########################
+# Global defaults
+##########################
+[*]
+# Use UTF-8 everywhere (no BOM)
+charset = utf-8
+# Normalize line endings to LF for CI and cross-platform stability
+end_of_line = lf
+# Use spaces as default indentation for consistency
+indent_style = space
+# Default indent size (can be overridden per-language below)
+indent_size = 4
+# Always ensure final newline
+insert_final_newline = true
+# Remove trailing whitespace by default (exceptions are specified below)
+trim_trailing_whitespace = true
+# Recommended max line length for readability and diffs (editors may enforce)
+max_line_length = 120
+
+##########################
+# Files where LF isn't desirable
+##########################
+# Batch files (Windows) should use CRLF
+[*.bat]
+end_of_line = crlf
+trim_trailing_whitespace = false
+
+# Makefiles require tabs for recipes
+[Makefile]
+indent_style = tab
+trim_trailing_whitespace = false
+
+##########################
+# Markup / docs
+##########################
+[*.md]
+# Keep Markdown tidy: trailing whitespace often intentional (line break)
+trim_trailing_whitespace = false
+max_line_length = off
+
+[*.{yml,yaml}]
+indent_size = 2
+# YAML is sensitive to tabs; forbid them
+indent_style = space
+max_line_length = 120
+
+[*.{json,json5}]
+indent_size = 2
+indent_style = space
+# Keep lockfiles and package files consistent
+[package.json]
+indent_size = 2
+
+##########################
+# Source language specific rules
+##########################
+
+# Python
+[*.py]
+indent_size = 4
+indent_style = space
+max_line_length = 88
+# allow trailing whitespace in triple-quoted strings (editors handle), but default off
+trim_trailing_whitespace = true
+charset = utf-8
+
+# JavaScript / TypeScript / JSX / TSX
+[*.{js,jsx,ts,tsx,mjs,cjs}]
+indent_size = 2
+indent_style = space
+max_line_length = 100
+
+# Node lock / package files as text with LF
+[package-lock.json]
+indent_size = 2
+trim_trailing_whitespace = false
+
+[yarn.lock]
+trim_trailing_whitespace = false
+
+# .NET / C#
+[*.{cs,csproj,sln}]
+indent_size = 4
+indent_style = space
+max_line_length = 120
+
+# Java
+[*.{java,gradle}]
+indent_size = 4
+indent_style = space
+max_line_length = 120
+
+# C / C++
+[*.{c,h,cpp,hpp,cxx,hxx}]
+indent_size = 4
+indent_style = space
+max_line_length = 120
+
+# Go — follow gofmt style (tabs)
+[*.go]
+indent_style = tab
+# do not trim trailing whitespace for generated files pattern (if any)
+trim_trailing_whitespace = true
+max_line_length = 120
+
+# PHP
+[*.php]
+indent_size = 4
+indent_style = space
+max_line_length = 120
+
+# Ruby
+[*.{rb,rake}]
+indent_size = 2
+indent_style = space
+max_line_length = 100
+
+# SQL & PL/SQL (Oracle)
+[*.{sql,ddl,plsql,pls,pkb,pkh}]
+indent_size = 2
+indent_style = space
+max_line_length = 120
+
+# Oracle APEX and PL/SQL source files (file extensions may vary)
+[*.{apex,apexxml}]
+indent_size = 2
+indent_style = space
+
+# Salesforce Apex (classes and triggers)
+[*.{cls,trigger}]
+indent_size = 4
+indent_style = space
+max_line_length = 120
+
+# Terraform / HCL
+[*.{tf,tfvars}]
+indent_size = 2
+indent_style = space
+max_line_length = 120
+
+# Bicep
+[*.bicep]
+indent_size = 2
+indent_style = space
+max_line_length = 120
+
+# Shell scripts
+[*.{sh,bash}]
+indent_size = 2
+indent_style = space
+trim_trailing_whitespace = true
+# shell scripts should be LF
+end_of_line = lf
+
+# PowerShell
+[*.ps1]
+indent_size = 4
+indent_style = space
+max_line_length = 120
+
+# Binary / generated files - no trimming to avoid corruption
+[*.{png,jpg,jpeg,gif,ico,zip,jar}]
+trim_trailing_whitespace = false
+insert_final_newline = false
+
+##########################
+# Special cases / generated files
+##########################
+# Protobuf generated files often follow language-specific format; treat as generated
+[*.pb.*]
+trim_trailing_whitespace = false
+
+# Lock files usually are generated and should keep exact formatting
+[*.lock]
+trim_trailing_whitespace = false
+insert_final_newline = true
+
+##########################
+# Overrides & editor hints
+##########################
+# Allow editors to detect that Git-managed binary files are not to be modified
+[*.exe]
+trim_trailing_whitespace = false
+insert_final_newline = false
+
+# End of file
