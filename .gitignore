@@ -1,0 +1,323 @@
+# ----------------------------------------
+# Enterprise .gitignore
+# Covers Oracle APEX, Salesforce APEX, .NET, JavaScript, C#, C/C++, Java, Python, Go, PHP, SQL, Ruby, Terraform, Bicep, PL/SQL
+# ----------------------------------------
+
+# ----------------------------------------
+# OS / Editor / Environment artifacts
+# ----------------------------------------
+# macOS / Windows
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Editors / IDEs
+.idea/
+.vscode/
+*.code-workspace
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Environment & local dev
+.env
+.env.*
+.*.env
+*.local
+*.local.*
+.python-version
+
+# Temporary files
+*.swp
+*.swo
+*.tmp
+*.bak
+*.backup
+*.orig
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ----------------------------------------
+# Build / Output / Distribution artifacts
+# ----------------------------------------
+dist/
+build/
+target/
+bin/
+obj/
+out/
+release/
+debug/
+.cache/
+.parcel-cache/
+.turbo/
+.vercel/
+.next/
+coverage/
+coverage.xml
+.nyc_output/
+reports/
+test-results/
+tmp/
+temp/
+
+# ----------------------------------------
+# Dependency / Package directories
+# ----------------------------------------
+# Node.js
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+pip-wheel-metadata/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+
+# Java / Gradle / Maven
+*.class
+*.jar
+*.war
+*.ear
+*.iml
+.gradle/
+build/
+!gradle-wrapper.jar
+*.log
+hs_err_pid*
+replay_pid*
+
+# .NET / C#
+[Bb]in/
+[Oo]bj/
+*.dll
+*.exe
+*.pdb
+*.mdb
+*.appx
+*.appxupload
+*.snupkg
+*.nupkg
+*.vspscc
+*.vsp
+*.vssscc
+*.pidb
+*.dbmdl
+*.pubxml
+*.pubxml.user
+project.lock.json
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# PHP / Composer
+vendor/
+composer.lock
+composer.phar
+
+# Ruby / Rails
+.bundle/
+vendor/bundle/
+log/
+tmp/
+db/*.sqlite3
+db/*.sqlite3-journal
+public/assets/
+.byebug_history
+*.gem
+
+# C / C++
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.exe
+*.dll
+*.out
+*.app
+*.idb
+*.pdb
+*.sdf
+*.opensdf
+*.vcxproj.user
+*.tlog
+
+# ----------------------------------------
+# Infrastructure as Code
+# ----------------------------------------
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+.terraform.tfstate.backup
+terraform.tfvars
+terraform.tfvars.json
+override.tf
+override.tf.json
+*.override.tf
+*.override.tf.json
+crash.log
+plan.out
+
+# Bicep / ARM
+*.bicep
+bicep-cache/
+*.azcli
+parameters.local.json
+
+# ----------------------------------------
+# Cloud / Container
+# ----------------------------------------
+# Docker
+Dockerfile.*
+docker-compose.override.yml
+.dockerignore
+docker-compose*.yml
+tmp/
+
+# Kubernetes
+*.kubeconfig
+*.kubeconfig.*
+kubeconfig-*
+*.yaml.save
+*.yaml.bak
+
+# ----------------------------------------
+# Databases / SQL / Oracle / PL/SQL / APEX
+# ----------------------------------------
+*.sql~
+*.sql.bak
+*.dmp
+*.log
+*.trc
+*.trm
+*.ora
+*.db
+*.sqlite
+*.sqlite3
+*.mdf
+*.ldf
+*.bak
+*.data
+*.ctl
+*.lob
+*.csv
+# Oracle APEX exports or temp
+apex_export/
+*.apex
+*.apexxml
+*.apexarchive
+# PL/SQL compiled artifacts
+*.plb
+*.pck
+*.pkb
+*.pkh
+
+# ----------------------------------------
+# Salesforce / APEX metadata
+# ----------------------------------------
+.sfdx/
+.deploy/
+.deployignore
+.testResults/
+*.log
+*.cls-meta.xml
+*.trigger-meta.xml
+*.resource-meta.xml
+*.xml.bak
+.forceignore
+.scratch-def.json
+.project-scratch-def.json
+package.xml
+coverage/
+.cache/
+.localdevserver/
+
+# ----------------------------------------
+# Secrets / credentials (enforced at policy)
+# ----------------------------------------
+secrets.*
+*.pem
+*.crt
+*.key
+*.pfx
+*.p12
+*.cert
+*.csr
+*.keystore
+*.jks
+*.envrc
+
+# ----------------------------------------
+# Misc / CI / Temporary
+# ----------------------------------------
+*.pid
+*.seed
+*.tsbuildinfo
+.lerna/
+.npm/
+.pnpm-store/
+eslintcache
+.stylelintcache
+.prettier_cache
+.husky/_/
+.editorconfig.save
+.gitconfig.local
+
+# CI artifacts
+*.artifact
+*.result
+*.report
+*.cache
+ci-temp/
+ci-output/
+
+# ----------------------------------------
+# OS specific ignores
+# ----------------------------------------
+# macOS
+.AppleDouble
+.LSOverride
+Icon?
+# Windows
+ehthumbs_vista.db
+$RECYCLE.BIN/
+# Linux
+*.pid.lock
+
+# ----------------------------------------
+# Backup / Misc patterns
+# ----------------------------------------
+*~
+*.bak
+*.orig
+*.rej
