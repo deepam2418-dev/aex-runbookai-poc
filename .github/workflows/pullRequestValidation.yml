@@ -1,0 +1,24 @@
+name: Pull Request Validation
+on:
+    pull_request:
+concurrency:
+  group: ${{ github.repository }}-pr-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qwietai-scan:
+    name: QwietAI Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: QwietAI Scan
+        uses: syneos-internal/shared-cicd-templates/qwietai-scan@main
+        with:
+          app-name: ${{ github.event.repository.name }}
+          app-group: 'IaC-Automation'
+        env:
+          SHIFTLEFT_ACCESS_TOKEN: ${{ secrets.QWIET_AI_TOKEN }}
