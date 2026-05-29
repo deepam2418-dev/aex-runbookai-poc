@@ -1,0 +1,80 @@
+###############################################################################################
+                        LinuxOps Inventory
+###############################################################################################
+
+[
+    {
+        "templateId": 21,
+        "tags": [
+            "CPU Alert - Linux",
+            "CPU Issue - Linux"
+        ],
+        "inputs": {
+            "hostname": "<get from servicenow incident CI name or extract from short description>",
+            "threshold": 80
+        }
+    },
+    {
+        "templateId": 22,
+        "tags": [
+            "Memory Alert - Linux",
+            "Memory Issue - Linux"
+        ],
+        "inputs": {
+            "hostname": "<get from servicenow incident CI name or extract from short description>",
+            "threshold": 80
+        }
+    },
+    {
+        "templateId": 23,
+        "tags": [
+            "FileSystem Alert - Linux",
+            "FileSystem Issue - Linux"
+        ],
+        "inputs": {
+            "hostname": "<get from servicenow incident CI name or extract from short description>",
+            "threshold": 80
+        }
+    }
+]
+
+
+###############################################################################################
+                        WindowsOps Inventory
+###############################################################################################
+
+[
+    {
+        "templateId": 24,
+        "tags": [
+            "CPU Alert - Windows",
+            "CPU Issue - Windows"
+        ],
+        "inputs": {
+            "hostname": "<get from servicenow incident CI name or extract from short description>",
+            "threshold": 80
+        }
+    },
+    {
+        "templateId": 26,
+        "tags": [
+            "Memory Alert - Windows",
+            "Memory Issue - Windows"
+        ],
+        "inputs": {
+            "hostname": "<get from servicenow incident CI name or extract from short description>",
+            "threshold": 80
+        }
+    },
+    {
+        "templateId": 25,
+        "tags": [
+            "FileSystem Alert - Windows",
+            "FileSystem Issue - Windows"
+        ],
+        "inputs": {
+            "hostname": "<get from servicenow incident CI name or extract from short description>",
+            "threshold": 80
+        }
+    }
+]
