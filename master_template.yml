@@ -1,0 +1,233 @@
+- hosts: localhost
+  gather_facts: no
+  vars:
+    device_matrix:
+      cisco:
+        ansible_connection: network_cli
+        ansible_network_os: ios
+      fortigate:
+        ansible_connection: httpapi
+        ansible_network_os: fortinet.fortios.fortios
+        ansible_httpapi_use_ssl: no
+        ansible_httpapi_validate_certs: no
+        ansible_httpapi_port: 80
+      arista:
+        ansible_connection: httpapi
+        ansible_network_os: arista.eos.eos
+        ansible_httpapi_use_ssl: false
+        ansible_httpapi_validate_certs: false
+        ansible_httpapi_port: 80
+      juniper:
+        ansible_network_os: junipernetworks.junos.junos
+        ansible_connection: ansible.netcommon.network_cli
+
+  tasks:
+    - block:
+        - add_host:
+            host: "{{ target_host }}"
+            os: linux
+
+        - wait_for_connection:
+            timeout: 10
+          delegate_to: "{{ target_host }}"
+          register: linux_connection
+
+        - debug:
+            msg: "linux: {{ linux_connection }}"
+
+      rescue:
+        - set_fact:
+            updated: "Platform check failed for linux. Now checking the connectivity for windows/network."
+        - debug:
+            msg: "Platform check failed for linux. Now checking the connectivity for windows/network."
+
+    - block:
+        - add_host:
+            host: "{{ target_host }}"
+            ansible_port: 5985
+            ansible_connection: winrm
+            ansible_winrm_transport: ntlm
+            ansible_winrm_server_cert_validation: ignore
+            os: windows
+          no_log: True
+
+        - wait_for_connection:
+            timeout: 10
+          delegate_to: "{{ target_host }}"
+          register: windows_connection
+          ignore_errors: yes
+
+        - debug:
+            msg: " windows: {{ windows_connection }}"
+      when: linux_connection.failed
+
+    - block:
+        - debug:
+            msg: "Platform check failed for windows. Now checking the connectivity for network."
+
+        - name: Run 'show version' using raw SSH
+          ansible.builtin.shell: |
+            sshpass -p {{ ansible_password }} ssh -o StrictHostKeyChecking=no \
+            -o KexAlgorithms=+diffie-hellman-group14-sha1 \
+            -o HostKeyAlgorithms=+ssh-rsa {{ ansible_user }}@{{ target_host }} "show version"
+          register: version_output
+          changed_when: false
+          failed_when: version_output.rc != 0 and "'show version'" not in version_output.stdout
+          ignore_errors: true
+          no_log: true
+
+        - name: Display device version output
+          debug:
+            msg: "{{ version_output.stdout }}"
+
+        - name: Detect network device vendor
+          set_fact:
+            vendor: >-
+              {% if 'Junos:' in version_output.stdout %}
+                juniper
+              {% elif 'Arista' in version_output.stdout %}
+                arista
+              {% elif 'Cisco IOS' in version_output.stdout %}
+                cisco
+              {% elif 'Fortinet' in version_output.stdout %}
+                fortigate
+              {% else %}
+                unknown
+              {% endif %}
+          when: version_output is defined and version_output.stdout | length > 0
+
+        - name: Strip whitespace from vendor
+          set_fact:
+            vendor: "{{ vendor | trim }}"
+          when: vendor is defined
+
+        - name: Strip whitespace from vendor
+          debug:
+            msg: "{{ vendor }}"
+          when: vendor is defined
+
+      when:
+        - linux_connection is defined
+        - windows_connection is defined
+        - linux_connection.failed
+        - windows_connection.failed
+
+    - block:
+        - include_role:
+            name: iautomate_update
+          vars:
+            status_codes: -1
+            iautomate_success: "iAutomate cannot reach the target server {{ target_host }}. Transferring the incident."
+
+        - debug:
+            msg: " iAutomate cannot reach the target server {{ target_host }}. Transferring the incident."
+
+        - fail:
+            msg: "iAutomate cannot reach the target server {{ target_host }}."
+      when:
+        - linux_connection is defined
+        - windows_connection is defined
+        - linux_connection.failed
+        - windows_connection.failed
+        - version_output.rc != 0
+
+    - block:
+        - include_role:
+            name: iautomate_update
+          vars:
+            status_codes: -1
+            iautomate_success: "Network device type could not be determined. Additional information related to device type and connectivity parameters are required."
+
+        - debug:
+            msg: "Network device type could not be determined. Additional information related to device type and connectivity parameters are required."
+
+        - fail:
+            msg: "Network device type could not be determined. Additional information related to device type and connectivity parameters are required."
+
+      when:
+        - linux_connection is defined
+        - windows_connection is defined
+        - (linux_connection.failed)
+        - (windows_connection.failed)
+        - vendor is not defined or vendor == "unknown"
+
+    - add_host:
+        host: "{{ target_host }}"
+        groups: iautomate
+        os: linux
+      no_log: true
+      when: updated is not defined
+
+    - add_host:
+        host: "{{ target_host }}"
+        groups: iautomate
+        ansible_port: 5985
+        ansible_connection: winrm
+        ansible_winrm_transport: ntlm
+        ansible_winrm_server_cert_validation: ignore
+        os: windows
+      when:
+        - windows_connection is defined
+        - windows_connection is succeeded
+        - linux_connection is defined
+        - linux_connection.failed
+      no_log: True
+
+    - add_host:
+        host: "{{ target_host }}"
+        groups: iautomate
+        os: network_device
+        vendor: "{{ vendor }}"
+        ansible_host: "{{ target_host }}"
+        ansible_port: 22
+        ansible_connection: "{{ device_matrix[vendor].ansible_connection }}"
+        ansible_network_os: "{{ device_matrix[vendor].ansible_network_os }}"
+        ansible_network_cli_ssh_type: "{{ device_matrix[vendor].ansible_network_cli_ssh_type | default(omit) }}"
+        ansible_httpapi_use_ssl: "{{ device_matrix[vendor].ansible_httpapi_use_ssl | default(omit) }}"
+        ansible_httpapi_validate_certs: "{{ device_matrix[vendor].ansible_httpapi_validate_certs | default(omit) }}"
+        ansible_httpapi_port: "{{ device_matrix[vendor].ansible_httpapi_port | default(omit) }}"
+      no_log: true
+      when: vendor is defined
+
+- hosts: iautomate
+  gather_facts: no
+  tasks:
+    - block:
+        - include_role:
+            name: iautomate_update
+          vars:
+            status_codes: 0
+            iautomate_success: "iAutomate RBE initiated the script execution at target host {{ target_host }}."
+
+        - include_role:
+            name: "{{ role_name }}"
+          when: os == "windows"
+
+        - include_role:
+            name: "{{ role_name }}"
+          when: os == "linux"
+
+        - include_role:
+            name: "{{ role_name }}"
+          when: os == "network_device"
+
+        - include_role:
+            name: iautomate_update
+          vars:
+            status_codes: 1
+            iautomate_success: "{{ response_message }}"
+          when: status_code is not defined
+
+        - include_role:
+            name: iautomate_update
+          vars:
+            status_codes: 2
+            iautomate_success: "{{ response_message }}"
+          when: status_code is defined
+
+      rescue:
+        - include_role:
+            name: iautomate_update
+          vars:
+            status_codes: -1
+            iautomate_success: "iAutomate execution failed on the server {{ target_host }}."
