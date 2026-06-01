@@ -11,7 +11,7 @@
 
     # Approved processes for auto remediation
     process_list:
-      # - dataprocess
+      - dataprocess
       - testprocess
 
   tasks:
