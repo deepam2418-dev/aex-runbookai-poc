@@ -11,8 +11,8 @@
 
     # Approved processes for auto remediation
     process_list:
+      - dataprocess1
       - dataprocess
-      - testprocess
 
   tasks:
 
@@ -118,16 +118,16 @@
     # RESTART DATAPROCESS
     # =====================================================
     - name: Restart dataprocess
-      shell: "/home/svc_agenticai@ivhinc.com/script/dataprocess.sh"
+      shell: "/home/svc_agenticai@ivhinc.com/script/dataprocess1.sh"
       register: restart_result
       when:
-        - "'dataprocess' in filtered_names"
+        - "'dataprocess1' in filtered_names"
 
     - name: Display restart output
       debug:
         var: restart_result.stdout_lines
       when:
-        - "'dataprocess' in filtered_names"
+        - "'dataprocess1' in filtered_names"
 
     - name: Set remediation status
       set_fact:
