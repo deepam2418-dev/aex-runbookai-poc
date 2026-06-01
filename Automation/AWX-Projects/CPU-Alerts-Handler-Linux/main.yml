@@ -120,8 +120,7 @@
     - name: Restart dataprocess
       shell: nohup /home/svc_agenticai@ivhinc.com/script/dataprocess1.sh &
       register: restart_result
-      when:
-        - "'dataprocess1' in filtered_names"
+      
 
     - name: Display restart output
       debug:
@@ -185,7 +184,7 @@
           {% if current_cpu_value | float < cpu_threshold | float %}
           Current CPU utilization on host {{ hostname }} is {{ current_cpu_value }}%, which is below the configured threshold of {{ cpu_threshold }}%. No remediation was required. Marking the ticket as resolved.
           {% elif final_cpu_value | float < cpu_threshold | float %}
-          CPU usage on host {{ hostname }} exceeded the configured threshold of {{ cpu_threshold }}%. Approved high CPU processes identified: {{ filtered_names | unique | join(', ') if filtered_names | length > 0 else 'None' }}. Post-remediation CPU utilization is {{ final_cpu_value }}%. CPU utilization returned to normal levels. Marking the ticket as resolved.
+          CPU usage on host {{ hostname }} exceeded the configured threshold of {{ cpu_threshold }}%. Approved high CPU processes identified: {{ filtered_names | unique | join(', ') if filtered_names | length > 0 else 'None' }}. Post-remediation CPU utilization is {{ final_cpu_value }}%. dataprocess service restared. CPU utilization returned to normal levels. Marking the ticket as resolved.
           {% else %}
           CPU usage on host {{ hostname }} exceeded the configured threshold of {{ cpu_threshold }}%. Approved high CPU processes identified: {{ filtered_names | unique | join(', ') if filtered_names | length > 0 else 'None' }}. Post-remediation CPU utilization remains at {{ final_cpu_value }}%, which is still above threshold. Escalating the ticket for further investigation.
           {% endif %}
