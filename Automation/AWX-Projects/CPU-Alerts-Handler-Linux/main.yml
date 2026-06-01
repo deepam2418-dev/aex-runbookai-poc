@@ -92,6 +92,40 @@
       when:
         - process_killed | bool
 
+    - name: Restart dataprocess
+      shell: "/home/svc_agenticai@ivhinc.com/script/dataprocess.sh"
+      register: restart_result
+      when:
+        - "'dataprocess' in filtered_names"
+
+    - name: Display restart output
+      debug:
+        var: restart_result.stdout_lines
+      when:
+        - "'dataprocess' in filtered_names"
+
+    - name: Set remediation status
+      set_fact:
+        process_killed: true
+      when:
+        - filtered_pids | length > 0
+
+    - name: Set remediation skipped
+      set_fact:
+        process_killed: false
+      when:
+        - filtered_pids | length == 0
+
+    # =====================================================
+    # WAIT FOR PROCESS STARTUP
+    # =====================================================
+    - name: Wait for dataprocess startup
+      pause:
+        seconds: 10
+      when:
+        - "'dataprocess' in filtered_names"
+
+
     # =====================================================
     # RECHECK OVERALL CPU USAGE
     # =====================================================
