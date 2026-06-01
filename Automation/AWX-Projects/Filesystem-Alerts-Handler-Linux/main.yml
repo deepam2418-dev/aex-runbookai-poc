@@ -100,9 +100,7 @@
 
     - name: Set cleanup status
       set_fact:
-        cleanup_performed: true
-      when:
-        - delete_output is defined
+        cleanup_performed: "{{ delete_output.changed | default(false) }}"
 
     - name: Set cleanup skipped
       set_fact:
@@ -161,30 +159,13 @@
           }}
 
         response_message: >-
-          {{
-            'Filesystem usage on host ' ~ hostname ~
-            ' was initially detected at ' ~ (filesystem_usage | string) ~
-            '%, exceeding the configured threshold of ' ~
-            (filesystem_threshold | string) ~ '%. ' ~
-
-            (
-              'Cleanup was performed in allowed directories (' ~
-              allowed_cleanup_dirs | join(', ') ~ '). '
-              if cleanup_performed | bool
-              else
-              'No eligible files were found for cleanup. '
-            ) ~
-
-            'Post-remediation filesystem utilization is ' ~
-            (final_filesystem_usage | string) ~ '%. ' ~
-
-            (
-              'Filesystem usage is now within acceptable limits. Marking the ticket as resolved.'
-              if (final_filesystem_usage | float) < (filesystem_threshold | float)
-              else
-              'Filesystem usage remains high after remediation. Escalating the ticket.'
-            )
-          }}
+          {% if filesystem_usage | float < filesystem_threshold | float %}
+          Filesystem utilization on host {{ hostname }} is {{ filesystem_usage }}%, which is below the configured threshold of {{ filesystem_threshold }}%. No remediation was required. Marking the ticket as resolved.
+          {% elif final_filesystem_usage | float < filesystem_threshold | float %}
+          Filesystem usage on host {{ hostname }} exceeded the configured threshold of {{ filesystem_threshold }}%. Cleanup was performed in allowed directories ({{ allowed_cleanup_dirs | join(', ') }}). Post-remediation filesystem utilization is {{ final_filesystem_usage }}%. Filesystem usage is now within acceptable limits. Marking the ticket as resolved.
+          {% else %}
+          Filesystem usage on host {{ hostname }} exceeded the configured threshold of {{ filesystem_threshold }}%. Cleanup was performed in allowed directories ({{ allowed_cleanup_dirs | join(', ') }}). Post-remediation filesystem utilization is {{ final_filesystem_usage }}%. Filesystem usage remains high after remediation. Escalating the ticket.
+          {% endif %}
 
     # =====================================================
     # DISPLAY FINAL RESULT
