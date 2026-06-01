@@ -118,7 +118,7 @@
     # RESTART DATAPROCESS
     # =====================================================
     - name: Restart dataprocess
-      shell: "/home/svc_agenticai@ivhinc.com/script/dataprocess1.sh"
+      shell: nohup /home/svc_agenticai@ivhinc.com/script/dataprocess1.sh &
       register: restart_result
       when:
         - "'dataprocess1' in filtered_names"
