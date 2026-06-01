@@ -1,5 +1,5 @@
 # =========================================================
-# PLAY 1 - CPU MONITORING & AUTO REMEDIATION
+# CPU MONITORING & AUTO REMEDIATION
 # =========================================================
 - name: CPU Monitoring and Auto Remediation
   hosts: "{{ hostname }}"
@@ -7,7 +7,7 @@
   become: yes
 
   vars:
-    cpu_threshold: "{{ threshold | default(70) }}"
+    cpu_threshold: "{{ threshold | default(80) }}"
 
     # Approved processes for auto remediation
     process_list:
@@ -17,6 +17,33 @@
   tasks:
 
     # =====================================================
+    # CHECK CURRENT CPU USAGE
+    # =====================================================
+    - name: Get current CPU usage
+      shell: "top -bn1 | grep 'Cpu(s)' | awk '{print 100 - $8}'"
+      register: current_cpu
+      changed_when: false
+
+    - name: Set current CPU value
+      set_fact:
+        current_cpu_value: "{{ current_cpu.stdout | trim | float | round(2) }}"
+
+    - name: Display current CPU usage
+      debug:
+        msg: "Current CPU Usage: {{ current_cpu_value }}%"
+
+    # =====================================================
+    # DEFAULT VALUES
+    # =====================================================
+    - name: Initialize variables
+      set_fact:
+        filtered_processes: []
+        filtered_pids: []
+        filtered_names: []
+        process_killed: false
+        final_cpu_value: "{{ current_cpu_value }}"
+
+    # =====================================================
     # GET HIGH CPU PROCESSES
     # =====================================================
     - name: Get matching high CPU processes
@@ -24,10 +51,14 @@
         ps -eo pid,comm,%cpu --no-headers | awk '$3 > {{ cpu_threshold }} {print $1, $2, $3}'
       register: high_cpu
       changed_when: false
+      when:
+        - current_cpu_value | float >= cpu_threshold | float
 
     - name: Display high CPU processes
       debug:
         msg: "{{ high_cpu.stdout_lines }}"
+      when:
+        - current_cpu_value | float >= cpu_threshold | float
 
     # =====================================================
     # FILTER ONLY APPROVED PROCESSES
@@ -41,10 +72,14 @@
             | selectattr('1', 'in', process_list)
             | list
           }}
+      when:
+        - current_cpu_value | float >= cpu_threshold | float
 
     - name: Display filtered processes
       debug:
         msg: "{{ filtered_processes }}"
+      when:
+        - current_cpu_value | float >= cpu_threshold | float
 
     # =====================================================
     # EXTRACT PROCESS DETAILS
@@ -52,14 +87,21 @@
     - name: Extract process PIDs
       set_fact:
         filtered_pids: "{{ filtered_processes | map('first') | list }}"
+      when:
+        - current_cpu_value | float >= cpu_threshold | float
 
     - name: Extract process names
       set_fact:
         filtered_names: "{{ filtered_processes | map(attribute='1') | list }}"
+      when:
+        - current_cpu_value | float >= cpu_threshold | float
 
     - name: Display filtered process IDs
       debug:
-        msg: "{{ filtered_pids }}"    
+        msg: "{{ filtered_pids }}"
+      when:
+        - current_cpu_value | float >= cpu_threshold | float
+
     # =====================================================
     # KILL FILTERED HIGH CPU PROCESSES
     # =====================================================
@@ -69,29 +111,12 @@
       register: kill_results
       ignore_errors: yes
       when:
+        - current_cpu_value | float >= cpu_threshold | float
         - filtered_pids | length > 0
 
-    - name: Set remediation status
-      set_fact:
-        process_killed: true
-      when:
-        - filtered_pids | length > 0
-
-    - name: Set remediation skipped
-      set_fact:
-        process_killed: false
-      when:
-        - filtered_pids | length == 0
-
     # =====================================================
-    # WAIT FOR CPU STABILIZATION
+    # RESTART DATAPROCESS
     # =====================================================
-    - name: Wait for CPU stabilization
-      pause:
-        seconds: 10
-      when:
-        - process_killed | bool
-
     - name: Restart dataprocess
       shell: "/home/svc_agenticai@ivhinc.com/script/dataprocess.sh"
       register: restart_result
@@ -110,12 +135,6 @@
       when:
         - filtered_pids | length > 0
 
-    - name: Set remediation skipped
-      set_fact:
-        process_killed: false
-      when:
-        - filtered_pids | length == 0
-
     # =====================================================
     # WAIT FOR PROCESS STARTUP
     # =====================================================
@@ -123,79 +142,53 @@
       pause:
         seconds: 10
       when:
-        - "'dataprocess' in filtered_names"
-
+        - process_killed | bool
 
     # =====================================================
-    # RECHECK OVERALL CPU USAGE
+    # RECHECK CPU AFTER REMEDIATION
     # =====================================================
-    - name: Get overall CPU usage
+    - name: Get overall CPU usage after remediation
       shell: "top -bn1 | grep 'Cpu(s)' | awk '{print 100 - $8}'"
       register: cpu_usage
       changed_when: false
+      when:
+        - process_killed | bool
 
     - name: Set final CPU value
       set_fact:
         final_cpu_value: "{{ cpu_usage.stdout | trim | float | round(2) }}"
+      when:
+        - process_killed | bool
 
-    - name: Print CPU usage
+    - name: Print final CPU usage
       debug:
         msg: "Current CPU Usage: {{ final_cpu_value }}%"
 
     # =====================================================
-    # SET STATUS CODE
+    # STATUS CODE
     # =====================================================
     - name: Set final status code
       set_fact:
         status_code: >-
           {{
-            1 if (final_cpu_value | float) < (cpu_threshold | float)
+            1
+            if (final_cpu_value | float) < (cpu_threshold | float)
             else 2
           }}
 
     # =====================================================
-    # SET RESPONSE MESSAGE
+    # RESPONSE MESSAGE
     # =====================================================
     - name: Set response message
       set_fact:
         response_message: >-
-          {{
-            (
-              'CPU usage on host ' ~ hostname ~
-              ' exceeded the configured threshold of ' ~
-              (cpu_threshold | string) ~ '%. '
-            )
-            ~
-
-            (
-              'Approved high CPU processes identified: ' ~
-              (filtered_names | unique | join(', ')) ~ '. '
-              if filtered_names | length > 0
-              else
-              'No approved high CPU processes were identified for remediation. '
-            )
-            ~
-
-            (
-              'Automation terminated the matching processes with PIDs: ' ~
-              (filtered_pids | join(', ')) ~ '. '
-              if filtered_pids | length > 0
-              else
-              ''
-            )
-            ~
-
-            (
-              'Post-remediation CPU utilization is ' ~
-              (final_cpu_value | string) ~
-              '%. CPU utilization returned to normal levels. Marking the ticket as resolved.'
-              if (final_cpu_value | float) < (cpu_threshold | float)
-              else
-              'Post-remediation CPU utilization remains at ' ~
-              (final_cpu_value | string) ~
-              '%, which is still above threshold. Escalating the ticket for further investigation.'
-            )
-          }}
+          {% if current_cpu_value | float < cpu_threshold | float %}
+          Current CPU utilization on host {{ hostname }} is {{ current_cpu_value }}%, which is below the configured threshold of {{ cpu_threshold }}%. No remediation was required. Marking the ticket as resolved.
+          {% elif final_cpu_value | float < cpu_threshold | float %}
+          CPU usage on host {{ hostname }} exceeded the configured threshold of {{ cpu_threshold }}%. Approved high CPU processes identified: {{ filtered_names | unique | join(', ') if filtered_names | length > 0 else 'None' }}. Post-remediation CPU utilization is {{ final_cpu_value }}%. CPU utilization returned to normal levels. Marking the ticket as resolved.
+          {% else %}
+          CPU usage on host {{ hostname }} exceeded the configured threshold of {{ cpu_threshold }}%. Approved high CPU processes identified: {{ filtered_names | unique | join(', ') if filtered_names | length > 0 else 'None' }}. Post-remediation CPU utilization remains at {{ final_cpu_value }}%, which is still above threshold. Escalating the ticket for further investigation.
+          {% endif %}
 
     # =====================================================
     # DISPLAY FINAL RESPONSE
