@@ -47,14 +47,8 @@
     # GET HIGH CPU PROCESSES
     # =====================================================
     - name: Get top Windows CPU processes
-      raw: >
-        powershell "
-        Get-Counter '\Process(*)\% Processor Time' |
-        Select-Object -ExpandProperty CounterSamples |
-        Sort-Object CookedValue -Descending |
-        Select-Object -First 20 InstanceName,
-        @{Name='CPU';Expression={[math]::Round($_.CookedValue,2)}}
-        "
+      raw: |
+        powershell -Command "Get-Counter '\Process(*)\% Processor Time' | Select-Object -ExpandProperty CounterSamples | Sort-Object CookedValue -Descending | Select-Object -First 20 InstanceName,CookedValue"
       register: windows_process_output
       when:
         - cpu_value | float > cpu_threshold | float
