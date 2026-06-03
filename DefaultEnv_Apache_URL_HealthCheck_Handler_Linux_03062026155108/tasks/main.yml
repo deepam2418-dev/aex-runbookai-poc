@@ -1,0 +1,90 @@
+---
+- name: Check URL health and restart Apache if unreachable
+  hosts: "{{ target_host }}"
+  become: yes
+  gather_facts: no
+
+  vars:
+    check_url: "{{ check_url }}"
+    apache_service_name: "{{ apache_service_name | default('httpd') }}"
+    timeout_seconds: "{{ timeout_seconds | default(10) | int }}"
+
+  tasks:
+    - name: Initialize result variables
+      set_fact:
+        status_code: 0
+        response_message: ""
+
+    - name: Validate required variable - check_url
+      assert:
+        that:
+          - check_url is defined
+          - check_url | length > 0
+        fail_msg: "The 'check_url' variable is required and was not provided."
+        success_msg: "'check_url' variable is provided."
+
+    - name: Validate timeout_seconds is an integer
+      assert:
+        that:
+          - (timeout_seconds | int) > 0
+        fail_msg: "The 'timeout_seconds' variable must be a positive integer."
+        success_msg: "'timeout_seconds' is a valid positive integer."
+
+    - block:
+        - name: Check URL reachability
+          uri:
+            url: "{{ check_url }}"
+            method: GET
+            return_content: no
+            status_code: 200,201,202,204
+            validate_certs: no
+            timeout: "{{ timeout_seconds | int }}"
+          register: url_check
+          failed_when: false
+
+        - name: Set fact if URL is reachable
+          set_fact:
+            url_reachable: "{{ (url_check.status is defined) and (url_check.status in [200,201,202,204]) }}"
+
+        - name: Debug URL status
+          debug:
+            msg: "URL {{ check_url }} reachable: {{ url_reachable | default(false) }}"
+
+        - name: Restart Apache if URL is not reachable
+          service:
+            name: "{{ apache_service_name }}"
+            state: restarted
+          when: not url_reachable | default(false)
+          register: apache_restart
+          failed_when: apache_restart is failed
+
+        - name: Set success status when URL was reachable
+          set_fact:
+            status_code: 1
+            response_message: "URL {{ check_url }} is reachable. Apache service '{{ apache_service_name }}' was not restarted."
+          when: url_reachable | default(false)
+
+        - name: Set success status when Apache restarted due to URL failure
+          set_fact:
+            status_code: 1
+            response_message: >-
+              URL {{ check_url }} was not reachable. Apache service '{{ apache_service_name }}'
+              has been restarted successfully.
+          when:
+            - not url_reachable | default(false)
+            - apache_restart is defined
+            - (apache_restart.failed | default(false)) == false
+
+      rescue:
+        - name: Capture error message
+          set_fact:
+            status_code: 2
+            response_message: >-
+              Playbook execution failed: {{ ansible_failed_result.msg | default('Unknown error occurred') }}
+
+      always:
+        - name: Final result
+          debug:
+            msg:
+              status_code: "{{ status_code }}"
+              response_message: "{{ response_message }}"
