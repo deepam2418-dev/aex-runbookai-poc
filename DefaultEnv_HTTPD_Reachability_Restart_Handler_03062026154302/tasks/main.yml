@@ -1,0 +1,68 @@
+---
+- name: Restart Apache httpd if website not reachable
+  hosts: "{{ hostname }}"
+  gather_facts: false
+
+  vars:
+    target_url: "{{ target_url | default('http://example.com') }}"
+    status_code: 0
+    response_message: ""
+
+  tasks:
+    - name: Check website reachability from controller
+      delegate_to: localhost
+      run_once: true
+      uri:
+        url: "{{ target_url }}"
+        method: GET
+        return_content: no
+        validate_certs: no
+        status_code:
+          - 200
+          - 301
+          - 302
+      register: website_check
+      failed_when: false
+
+    - name: Set flag if website is reachable
+      set_fact:
+        website_reachable: "{{ website_check.status in [200, 301, 302] }}"
+
+    - name: Restart httpd when website is not reachable
+      when: not website_reachable
+      become: true
+      block:
+        - name: Restart httpd service
+          service:
+            name: httpd
+            state: restarted
+          register: service_result
+
+        - name: Set success status after restart
+          set_fact:
+            status_code: 1
+            response_message: >-
+              Website {{ target_url }} was not reachable. httpd service restarted
+              on host {{ inventory_hostname }} successfully.
+
+      rescue:
+        - name: Set failure status if restart failed
+          set_fact:
+            status_code: 2
+            response_message: >-
+              Website {{ target_url }} was not reachable and httpd restart failed
+              on host {{ inventory_hostname }}. Error: {{ service_result | default(website_check) | to_nice_json }}
+
+    - name: Set status when website is already reachable
+      when: website_reachable | default(false)
+      set_fact:
+        status_code: 1
+        response_message: >-
+          Website {{ target_url }} is reachable. No action taken on host
+          {{ inventory_hostname }}.
+
+    - name: Show final result
+      debug:
+        msg:
+          status_code: "{{ status_code }}"
+          response_message: "{{ response_message }}"
