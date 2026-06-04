@@ -1,0 +1,56 @@
+---
+- name: Get CPU utilization from Linux machine
+  hosts: "{{ target_host }}"
+  gather_facts: no
+  vars:
+    # Duration in seconds over which to sample CPU utilization
+    cpu_sample_duration: "{{ cpu_sample_duration }}"
+  tasks:
+
+    - name: Validate cpu_sample_duration is a positive integer
+      assert:
+        that:
+          - cpu_sample_duration is defined
+          - cpu_sample_duration | int > 0
+        fail_msg: "cpu_sample_duration must be a positive integer (in seconds)."
+        success_msg: "cpu_sample_duration is valid."
+
+    - name: Collect CPU utilization using top
+      shell: |
+        CPUTIME="{{ cpu_sample_duration | int }}"
+        top -b -d "${CPUTIME}" -n 2 | awk '/^%Cpu/ {print 100 - $8}' | tail -1
+      args:
+        warn: false
+      register: cpu_cmd
+      changed: false
+      failed_when: cpu_cmd.rc != 0 or (cpu_cmd.stdout | trim) == ""
+
+    - name: Parse CPU utilization as float
+      set_fact:
+        cpu_utilization: "{{ cpu_cmd.stdout | trim | float }}"
+      failed_when: cpu_cmd.stdout | trim is not match('^[0-9]+(\\.[0-9]+)?$')
+
+    - name: Prepare success result
+      set_fact:
+        status_code: 1
+        response_message: "CPU utilization on host {{ inventory_hostname }} is {{ '%.2f' | format(cpu_utilization) }}% (sampled over {{ cpu_sample_duration }} seconds)."
+
+    - name: Debug result
+      debug:
+        msg:
+          status_code: "{{ status_code }}"
+          response_message: "{{ response_message }}"
+
+  rescue:
+    - name: Prepare failure result
+      set_fact:
+        status_code: 2
+        response_message: >-
+          Failed to get CPU utilization on host {{ inventory_hostname }}.
+          Error: {{ cpu_cmd.stderr | default(cpu_cmd.msg | default('Unknown error')) }}
+
+    - name: Debug failure
+      debug:
+        msg:
+          status_code: "{{ status_code }}"
+          response_message: "{{ response_message }}"
