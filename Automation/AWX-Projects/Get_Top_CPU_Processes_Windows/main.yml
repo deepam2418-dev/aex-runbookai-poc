@@ -1,5 +1,5 @@
 ---
-- name: Get top N CPU consuming processes (CPU values only) from Windows host
+- name: Get top N CPU consuming processes (Name + CPU) from Windows host
   hosts: "{{ target_host }}"
   gather_facts: no
 
@@ -20,7 +20,7 @@
         success_msg: "Parameter 'top_n' is valid."
       register: validation_result
 
-    - name: Get top N CPU consuming processes using PowerShell (CPU only)
+    - name: Get top N CPU consuming processes using PowerShell (Name + CPU)
       win_shell: |
         $topN = [int]{{ top_n }}
         $processes = Get-Process | Sort-Object CPU -Descending | Select-Object -First $topN Name, CPU
@@ -73,25 +73,20 @@
           set_fact:
             processes_parsed: "{{ [processes_parsed] }}"
 
-        - name: Extract only CPU values from processes
+        - name: Build human-readable summary of top processes (Name + CPU)
           when: processes_parsed is defined
           set_fact:
-            cpu_values: "{{ processes_parsed | map(attribute='CPU') | list }}"
-
-        - name: Build human-readable summary of top CPU values
-          when: cpu_values is defined
-          set_fact:
-            cpu_summary: >-
-              Top {{ top_n }} CPU values on {{ inventory_hostname }}:
-              {%- for c in cpu_values %}
-              - CPU={{ c | default('N/A') }}
+            processes_summary: >-
+              Top {{ top_n }} CPU-consuming processes on {{ inventory_hostname }}:
+              {%- for p in processes_parsed %}
+              - Name={{ p.Name | default('N/A') }}, CPU={{ p.CPU | default('N/A') }}
               {%- endfor %}
 
-        - name: Set success status and response message (CPU values only)
-          when: cpu_values is defined
+        - name: Set success status and response message
+          when: processes_parsed is defined
           set_fact:
             status_code: 1
-            response_message: "{{ cpu_summary }}"
+            response_message: "{{ processes_summary }}"
 
     - name: Final status output
       debug:
