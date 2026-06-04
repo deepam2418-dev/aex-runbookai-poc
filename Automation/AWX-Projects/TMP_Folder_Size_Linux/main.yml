@@ -1,0 +1,42 @@
+---
+- name: Get /tmp folder size from a Linux machine
+  hosts: "{{ target_host }}"
+  gather_facts: false
+
+  vars:
+    target_path: "/tmp"
+
+  tasks:
+    - name: Get size of target path in human-readable format
+      ansible.builtin.command: "du -sh {{ target_path }}"
+      register: du_result
+      changed_when: false
+      failed_when: du_result.rc != 0
+
+    - name: Parse du output to extract size and path
+      ansible.builtin.set_fact:
+        tmp_size: "{{ (du_result.stdout | default('') ).split()[0] | default('unknown', true) }}"
+        tmp_path: "{{ (du_result.stdout | default('') ).split()[1] | default(target_path, true) }}"
+      when: du_result.stdout is defined and du_result.stdout | length > 0
+
+    - name: Set success status when du command succeeded
+      ansible.builtin.set_fact:
+        status_code: 1
+        response_message: "Success: Size of {{ tmp_path | default(target_path) }} is {{ tmp_size | default('unknown') }}"
+      when: du_result.rc == 0
+
+    - name: Set failure status when du command failed
+      ansible.builtin.set_fact:
+        status_code: 2
+        response_message: >-
+          Failure: Unable to get size of {{ target_path }}.
+          Error: {{ du_result.stderr | default('No error message available') }}
+      when: du_result.rc != 0
+
+    - name: Display result
+      ansible.builtin.debug:
+        msg:
+          status_code: "{{ status_code }}"
+          response_message: "{{ response_message }}"
+          raw_du_output: "{{ du_result.stdout | default('') }}"
+          rc: "{{ du_result.rc }}"
