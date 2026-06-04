@@ -1,4 +1,3 @@
----
 - name: Get CPU utilization from Linux machine
   hosts: "{{ target_host }}"
   gather_facts: no
