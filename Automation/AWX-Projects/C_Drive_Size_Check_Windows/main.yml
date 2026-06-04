@@ -1,0 +1,61 @@
+---
+- name: Get C drive size from Windows machine
+  hosts: "{{ target_host }}"
+  gather_facts: no
+  vars:
+    drive_letter: "C:"
+  tasks:
+    - name: Get C drive size using PowerShell
+      win_shell: |
+        $drive = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='{{ drive_letter }}'"
+        if (-not $drive) {
+          Write-Output "ERROR: Drive {{ drive_letter }} not found."
+          exit 2
+        }
+        $totalGB = [math]::Round($drive.Size / 1GB, 2)
+        $freeGB  = [math]::Round($drive.FreeSpace / 1GB, 2)
+        $usedGB  = [math]::Round($totalGB - $freeGB, 2)
+        $usedPct = [math]::Round(($usedGB / $totalGB) * 100, 2)
+
+        $result = @{
+          status_code     = 1
+          response_message = "C drive size retrieved successfully"
+          drive_letter    = "{{ drive_letter }}"
+          total_gb        = $totalGB
+          free_gb         = $freeGB
+          used_gb         = $usedGB
+          used_percent    = $usedPct
+        }
+
+        $result | ConvertTo-Json -Compress
+      register: drive_info
+      failed_when: >
+        drive_info.rc != 0 or
+        (drive_info.stdout is search("ERROR:"))
+
+    - name: Parse drive info JSON
+      set_fact:
+        drive_info_parsed: "{{ drive_info.stdout | from_json }}"
+
+    - name: Set success result
+      set_fact:
+        status_code: "{{ drive_info_parsed.status_code | default(2) }}"
+        response_message: "{{ drive_info_parsed.response_message | default('Failed to retrieve C drive size') }}"
+      when: drive_info.rc == 0 and (drive_info.stdout is not search("ERROR:"))
+
+    - name: Set failure result if command failed
+      set_fact:
+        status_code: 2
+        response_message: "Failed to retrieve C drive size. Error: {{ drive_info.stderr | default(drive_info.stdout, true) }}"
+      when: drive_info.rc != 0 or (drive_info.stdout is search("ERROR:"))
+
+    - name: Display final result
+      debug:
+        msg:
+          status_code: "{{ status_code }}"
+          response_message: "{{ response_message }}"
+          drive_letter: "{{ drive_info_parsed.drive_letter | default(drive_letter) }}"
+          total_gb: "{{ drive_info_parsed.total_gb | default('N/A') }}"
+          free_gb: "{{ drive_info_parsed.free_gb | default('N/A') }}"
+          used_gb: "{{ drive_info_parsed.used_gb | default('N/A') }}"
+          used_percent: "{{ drive_info_parsed.used_percent | default('N/A') }}"
