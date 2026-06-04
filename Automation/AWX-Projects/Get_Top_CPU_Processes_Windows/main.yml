@@ -1,5 +1,5 @@
 ---
-- name: Get top N CPU and Memory consuming processes from Windows host
+- name: Get top N CPU consuming processes from Windows host
   hosts: "{{ target_host }}"
   gather_facts: no
 
@@ -7,7 +7,7 @@
     # Mandatory variables
     status_code: 2               # 1 = success, 2 = failure (initialized to failure)
     response_message: ""
-    top_n: "{{ top_n }}"         # Required parameter, no defaulting here per execution rules
+    top_n: "{{ top_n }}"
 
   tasks:
 
@@ -23,125 +23,88 @@
     - name: Get top N CPU consuming processes using PowerShell
       win_shell: |
         $topN = [int]{{ top_n }}
-        $processes = Get-Process | Sort-Object CPU -Descending | Select-Object -First $topN Name, Id, CPU, WS
+        $processes = Get-Process | Sort-Object CPU -Descending | Select-Object -First $topN Name, Id, CPU, WorkingSet64, StartTime
         if (-not $processes) {
           Write-Output "NO_PROCESSES_FOUND"
         } else {
-          $processes | ForEach-Object {
-            $_ | Add-Member -NotePropertyName MemoryMB -NotePropertyValue ([math]::Round($_.WS / 1MB, 2)) -Force
-            $_
-          }
-          $processes | ConvertTo-Json -Depth 3
+          # Convert WorkingSet64 to MB and shape the output
+          $detailed = $processes | Select-Object @{
+              Name = 'Name'; Expression = { $_.Name }
+            }, @{
+              Name = 'Id'; Expression = { $_.Id }
+            }, @{
+              Name = 'CPU'; Expression = { $_.CPU }
+            }, @{
+              Name = 'WorkingSetMB'; Expression = { [math]::Round($_.WorkingSet64 / 1MB, 2) }
+            }, @{
+              Name = 'StartTime'; Expression = {
+                  if ($_.StartTime -ne $null) { $_.StartTime.ToString('s') } else { $null }
+              }
+            }
+          $detailed | ConvertTo-Json -Depth 3
         }
-      register: cpu_process_info
+      register: process_info
       changed_when: false
       failed_when: false
 
-    - name: Get top N Memory consuming processes using PowerShell
-      win_shell: |
-        $topN = [int]{{ top_n }}
-        $processes = Get-Process | Sort-Object WS -Descending | Select-Object -First $topN Name, Id, CPU, WS
-        if (-not $processes) {
-          Write-Output "NO_PROCESSES_FOUND"
-        } else {
-          $processes | ForEach-Object {
-            $_ | Add-Member -NotePropertyName MemoryMB -NotePropertyValue ([math]::Round($_.WS / 1MB, 2)) -Force
-            $_
-          }
-          $processes | ConvertTo-Json -Depth 3
-        }
-      register: mem_process_info
-      changed_when: false
-      failed_when: false
-
-    - name: Check for errors in CPU process retrieval
+    - name: Check for errors in process retrieval
       set_fact:
-        cpu_command_failed: "{{ cpu_process_info.rc != 0 }}"
+        process_command_failed: "{{ process_info.rc != 0 }}"
 
-    - name: Check for errors in Memory process retrieval
-      set_fact:
-        mem_command_failed: "{{ mem_process_info.rc != 0 }}"
-
-    - name: Handle failure if both CPU and Memory retrieval failed
-      when: cpu_command_failed and mem_command_failed
+    - name: Handle failure in process retrieval
+      when: process_command_failed
       block:
         - name: Set failure status and message
           set_fact:
             status_code: 2
             response_message: >-
               Failed to retrieve processes from host {{ inventory_hostname }}.
-              CPU command rc={{ cpu_process_info.rc }}, stderr={{ cpu_process_info.stderr | default('N/A') }}.
-              Memory command rc={{ mem_process_info.rc }}, stderr={{ mem_process_info.stderr | default('N/A') }}.
+              Return code: {{ process_info.rc }}.
+              stderr: {{ process_info.stderr | default('N/A') }}.
 
-    - name: Parse CPU and Memory outputs when at least one succeeded
-      when: not (cpu_command_failed and mem_command_failed)
+    - name: Parse process output when successful
+      when: not process_command_failed
       block:
-
-        - name: Determine if no CPU processes were found
+        - name: Check if no processes were found
           set_fact:
-            no_cpu_processes_found: "{{ 'NO_PROCESSES_FOUND' in (cpu_process_info.stdout | default('')) }}"
+            no_processes_found: "{{ 'NO_PROCESSES_FOUND' in (process_info.stdout | default('')) }}"
 
-        - name: Determine if no Memory processes were found
-          set_fact:
-            no_mem_processes_found: "{{ 'NO_PROCESSES_FOUND' in (mem_process_info.stdout | default('')) }}"
-
-        - name: Parse JSON output of CPU processes
-          when: not cpu_command_failed and not no_cpu_processes_found
-          set_fact:
-            cpu_processes_parsed: "{{ cpu_process_info.stdout | from_json }}"
-
-        - name: Normalize CPU result to list if single object is returned
-          when: cpu_processes_parsed is defined and cpu_processes_parsed is mapping
-          set_fact:
-            cpu_processes_parsed: "{{ [cpu_processes_parsed] }}"
-
-        - name: Parse JSON output of Memory processes
-          when: not mem_command_failed and not no_mem_processes_found
-          set_fact:
-            mem_processes_parsed: "{{ mem_process_info.stdout | from_json }}"
-
-        - name: Normalize Memory result to list if single object is returned
-          when: mem_processes_parsed is defined and mem_processes_parsed is mapping
-          set_fact:
-            mem_processes_parsed: "{{ [mem_processes_parsed] }}"
-
-        - name: Build human-readable summary for CPU processes
-          when: (not cpu_command_failed) and (not no_cpu_processes_found) and cpu_processes_parsed is defined
-          set_fact:
-            cpu_processes_summary: >-
-              Top {{ top_n }} CPU-consuming processes on {{ inventory_hostname }}:
-              {%- for p in cpu_processes_parsed %}
-              - Name={{ p.Name | default('N/A') }}, PID={{ p.Id | default('N/A') }}, CPU={{ p.CPU | default('N/A') }}, MemoryMB={{ p.MemoryMB | default('N/A') }}
-              {%- endfor %}
-
-        - name: Build human-readable summary for Memory processes
-          when: (not mem_command_failed) and (not no_mem_processes_found) and mem_processes_parsed is defined
-          set_fact:
-            mem_processes_summary: >-
-              Top {{ top_n }} Memory-consuming processes on {{ inventory_hostname }}:
-              {%- for p in mem_processes_parsed %}
-              - Name={{ p.Name | default('N/A') }}, PID={{ p.Id | default('N/A') }}, CPU={{ p.CPU | default('N/A') }}, MemoryMB={{ p.MemoryMB | default('N/A') }}
-              {%- endfor %}
-
-        - name: Build combined response message
+        - name: Set response for no processes found
+          when: no_processes_found
           set_fact:
             status_code: 1
             response_message: >-
-              {% if cpu_command_failed %}
-              CPU section: Failed to retrieve processes. rc={{ cpu_process_info.rc }}, stderr={{ cpu_process_info.stderr | default('N/A') }}.
-              {% elif no_cpu_processes_found %}
-              CPU section: Command completed successfully but returned no data.
-              {% else %}
-              {{ cpu_processes_summary | default('CPU section: No data built.') }}
-              {% endif %}
+              No processes were returned from host {{ inventory_hostname }}.
+              Command completed successfully but returned no data.
 
-              {% if mem_command_failed %}
-              Memory section: Failed to retrieve processes. rc={{ mem_process_info.rc }}, stderr={{ mem_process_info.stderr | default('N/A') }}.
-              {% elif no_mem_processes_found %}
-              Memory section: Command completed successfully but returned no data.
-              {% else %}
-              {{ mem_processes_summary | default('Memory section: No data built.') }}
-              {% endif %}
+        - name: Parse JSON output of processes
+          when: not no_processes_found
+          set_fact:
+            processes_parsed: "{{ process_info.stdout | from_json }}"
+
+        - name: Normalize to list if single object is returned
+          when: processes_parsed is defined and processes_parsed is mapping
+          set_fact:
+            processes_parsed: "{{ [processes_parsed] }}"
+
+        - name: Build detailed human-readable summary of top processes
+          when: processes_parsed is defined
+          set_fact:
+            processes_summary: >-
+              Top {{ top_n }} CPU-consuming processes on {{ inventory_hostname }}:
+              {%- for p in processes_parsed %}
+              - Name={{ p.Name | default('N/A') }},
+                PID={{ p.Id | default('N/A') }},
+                CPU={{ p.CPU | default('N/A') }},
+                WorkingSetMB={{ p.WorkingSetMB | default('N/A') }},
+                StartTime={{ p.StartTime | default('N/A') }}
+              {%- endfor %}
+
+        - name: Set success status and response message
+          when: processes_parsed is defined
+          set_fact:
+            status_code: 1
+            response_message: "{{ processes_summary }}"
 
     - name: Final status output
       debug:
