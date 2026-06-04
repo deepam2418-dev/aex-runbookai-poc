@@ -1,15 +1,11 @@
-
 ---
 - name: Get CPU utilization from Linux machine
   hosts: "{{ target_host }}"
   gather_facts: no
-
   vars:
     cpu_sample_duration: "{{ cpu_sample_duration }}"
-
   tasks:
     - block:
-
         - name: Validate cpu_sample_duration is a positive integer
           assert:
             that:
@@ -31,7 +27,7 @@
         - name: Ensure CPU utilization output is numeric
           assert:
             that:
-              - cpu_cmd.stdout | trim is match('^[0-9]+(\\.[0-9]+)?$')
+              - cpu_cmd.stdout | trim is match('^[0-9]+(\.[0-9]+)?$')
             fail_msg: "CPU utilization output is not numeric: {{ cpu_cmd.stdout | trim }}"
 
         - name: Parse CPU utilization as float
@@ -44,7 +40,6 @@
             response_message: "CPU utilization on host {{ inventory_hostname }} is {{ '%.2f' | format(cpu_utilization) }}% (sampled over {{ cpu_sample_duration }} seconds)."
 
       rescue:
-
         - name: Prepare failure result
           set_fact:
             status_code: 2
