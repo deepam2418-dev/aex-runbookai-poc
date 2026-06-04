@@ -1,0 +1,69 @@
+---
+- name: Ensure Apache service is running only if it is currently stopped
+  hosts: "{{ target_host }}"
+  become: yes
+  gather_facts: no
+
+  vars:
+    status_code: 2
+    response_message: "Execution not completed"
+
+  tasks:
+    - name: Check current status of Apache service
+      ansible.builtin.service_facts:
+
+    - name: Determine if Apache service is known on the system
+      ansible.builtin.set_fact:
+        apache_service_known: "{{ service_name in ansible_facts.services }}"
+      failed_when: false
+
+    - name: Fail if Apache service is not found on the system
+      ansible.builtin.fail:
+        msg: "Service '{{ service_name }}' not found on this host."
+      when: not apache_service_known
+
+    - name: Get current state of Apache service
+      ansible.builtin.set_fact:
+        apache_current_state: "{{ ansible_facts.services[service_name].state | default('unknown') }}"
+
+    - name: Service is already running - no action taken
+      ansible.builtin.set_fact:
+        status_code: 1
+        response_message: "Service '{{ service_name }}' is already running. No restart performed."
+      when: apache_current_state == 'running'
+
+    - name: Start Apache service if it is not running
+      ansible.builtin.service:
+        name: "{{ service_name }}"
+        state: started
+      when: apache_current_state != 'running'
+
+    - name: Refresh service facts after start attempt
+      ansible.builtin.service_facts:
+      when: apache_current_state != 'running'
+
+    - name: Verify Apache service is running after start
+      ansible.builtin.set_fact:
+        apache_new_state: "{{ ansible_facts.services[service_name].state | default('unknown') }}"
+      when: apache_current_state != 'running'
+
+    - name: Set success status if service is running after start
+      ansible.builtin.set_fact:
+        status_code: 1
+        response_message: "Service '{{ service_name }}' was not running and has been successfully started."
+      when:
+        - apache_current_state != 'running'
+        - apache_new_state == 'running'
+
+    - name: Fail if Apache service failed to start
+      ansible.builtin.fail:
+        msg: "Service '{{ service_name }}' was not running and failed to start. Current state: '{{ apache_new_state | default('unknown') }}'."
+      when:
+        - apache_current_state != 'running'
+        - apache_new_state != 'running'
+
+    - name: Final status output
+      ansible.builtin.debug:
+        msg:
+          status_code: "{{ status_code }}"
+          response_message: "{{ response_message }}"
