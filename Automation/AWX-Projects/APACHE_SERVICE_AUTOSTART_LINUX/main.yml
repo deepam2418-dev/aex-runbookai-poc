@@ -5,8 +5,8 @@
   gather_facts: no
 
   vars:
-    status_code: 2
-    response_message: "Execution not completed"
+    status_code: 1
+    response_message: "Execution completed successfully - no action required for service management."
 
   tasks:
     - name: Check current status of Apache service
@@ -17,9 +17,14 @@
         apache_service_known: "{{ service_name in ansible_facts.services }}"
       failed_when: false
 
-    - name: Fail if Apache service is not found on the system
-      ansible.builtin.fail:
-        msg: "Service '{{ service_name }}' not found on this host."
+    - name: Exit gracefully if Apache service is not found on the system
+      ansible.builtin.set_fact:
+        status_code: 1
+        response_message: "Service '{{ service_name }}' not found on this host. No action required."
+      when: not apache_service_known
+
+    - name: End play when service is not found
+      ansible.builtin.meta: end_play
       when: not apache_service_known
 
     - name: Get current state of Apache service
