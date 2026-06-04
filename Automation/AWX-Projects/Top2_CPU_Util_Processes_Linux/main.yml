@@ -1,0 +1,47 @@
+---
+- name: Get top 2 highest CPU utilization processes on a Linux machine
+  hosts: "{{ target_host }}"
+  gather_facts: no
+  vars:
+    status_code: 0
+    response_message: ""
+
+  tasks:
+    - name: Get top 2 CPU utilization processes via shell
+      shell: |
+        ps -eo pid,comm,pcpu --sort=-pcpu | head -n 3
+      register: process_info
+      changed_when: false
+      failed_when: process_info.rc != 0
+
+    - name: Parse and format process output as JSON
+      set_fact:
+        process_list: >-
+          {{
+            process_info.stdout_lines[1:]
+            | map('regex_replace', '^[ ]*([0-9]+)[ ]+([^ ]+)[ ]+([0-9.]+)$', '{"pid":"\\1","command":"\\2","cpu":"\\3"}')
+            | list
+          }}
+      when: process_info.rc == 0
+
+    - name: Set success status and response message
+      set_fact:
+        status_code: 1
+        response_message: >-
+          Top 2 CPU utilization processes:
+          {{ process_list }}
+      when: process_info.rc == 0
+
+    - name: Set failure status and response message
+      set_fact:
+        status_code: 2
+        response_message: >-
+          Failed to retrieve top CPU processes. Error:
+          {{ process_info.stderr if process_info.stderr is defined else process_info.stdout }}
+      when: process_info.rc != 0
+
+    - name: Display final status and response
+      debug:
+        msg:
+          status_code: "{{ status_code }}"
+          response_message: "{{ response_message }}"
