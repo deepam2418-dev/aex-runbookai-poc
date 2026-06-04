@@ -1,0 +1,54 @@
+---
+- name: Collect RAM usage from Linux machine
+  hosts: "{{ target_host }}"
+  gather_facts: false
+  become: true
+
+  vars:
+    ram_usage_command: "free -m"
+
+  tasks:
+
+    - name: Initialize result variables
+      set_fact:
+        status_code: 0
+        response_message: ""
+
+    - name: Collect RAM usage using 'free -m'
+      shell: "{{ ram_usage_command }}"
+      register: ram_usage_result
+      changed_when: false
+      failed_when: ram_usage_result.rc != 0
+
+    - name: Parse RAM usage from command output
+      set_fact:
+        ram_usage_parsed: "{{ ram_usage_result.stdout_lines }}"
+      when: ram_usage_result.rc == 0
+
+    - name: Set success status and response message
+      set_fact:
+        status_code: 1
+        response_message: >-
+          RAM usage collected successfully.
+          Command: {{ ram_usage_command }}.
+          Output:
+          {{ ram_usage_result.stdout }}
+      when: ram_usage_result.rc == 0
+
+    - name: Set failure status and response message if command failed
+      set_fact:
+        status_code: 2
+        response_message: >-
+          Failed to collect RAM usage.
+          Command: {{ ram_usage_command }}.
+          Error: {{ ram_usage_result.stderr | default('N/A') }}.
+          Return code: {{ ram_usage_result.rc }}
+      when: ram_usage_result.rc != 0
+
+    - name: Display final result
+      debug:
+        msg:
+          status_code: "{{ status_code }}"
+          response_message: "{{ response_message }}"
+          raw_output: "{{ ram_usage_result.stdout | default('') }}"
+          parsed_output: "{{ ram_usage_parsed | default([]) }}"
