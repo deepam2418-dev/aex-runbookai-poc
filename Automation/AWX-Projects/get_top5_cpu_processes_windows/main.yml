@@ -1,6 +1,6 @@
 ---
 - name: Get top 5 CPU utilization processes on Windows
-  hosts: "{{ target_host }}"
+  hosts: "{{ target_host | default('all') }}"
   gather_facts: no
 
   vars:
