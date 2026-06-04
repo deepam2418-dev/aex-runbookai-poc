@@ -1,0 +1,53 @@
+---
+- name: Get size of /tmp folder on Linux host
+  hosts: "{{ target_host }}"
+  gather_facts: false
+
+  vars:
+    # Additional dynamic parameter: unit for size output
+    # Allowed values: KB, MB, GB
+    size_unit: "MB"
+
+  tasks:
+    - name: Validate size_unit value
+      assert:
+        that:
+          - size_unit in ["KB", "MB", "GB"]
+        fail_msg: "Invalid size_unit '{{ size_unit }}'. Allowed values: KB, MB, GB."
+        success_msg: "size_unit '{{ size_unit }}' is valid."
+
+    - name: Map size_unit to du option
+      set_fact:
+        unit_option: >-
+          {% if size_unit == "KB" %}-k
+          {% elif size_unit == "MB" %}-m
+          {% elif size_unit == "GB" %}-g
+          {% else %}-m{% endif %}
+
+    - name: Get size of /tmp folder
+      shell: "du -s {{ unit_option }} /tmp | awk '{print $1}'"
+      register: tmp_size_result
+      changed_when: false
+      failed_when: tmp_size_result.rc != 0
+
+    - name: Prepare success result
+      set_fact:
+        status_code: 1
+        response_message: >-
+          Size of /tmp on host {{ inventory_hostname }} is {{ tmp_size_result.stdout }}
+          {{ size_unit }}.
+      when: tmp_size_result.rc == 0
+
+    - name: Prepare failure result
+      set_fact:
+        status_code: 2
+        response_message: >-
+          Failed to get size of /tmp on host {{ inventory_hostname }}.
+          Error: {{ tmp_size_result.stderr | default(tmp_size_result.msg, true) }}
+      when: tmp_size_result.rc != 0
+
+    - name: Show final result
+      debug:
+        msg:
+          status_code: "{{ status_code }}"
+          response_message: "{{ response_message }}"
