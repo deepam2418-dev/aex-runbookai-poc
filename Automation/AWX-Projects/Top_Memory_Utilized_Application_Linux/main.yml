@@ -1,0 +1,41 @@
+---
+- name: Get top memory utilized applications from Linux machine
+  hosts: "{{ target_host }}"
+  gather_facts: false
+  vars:
+    top_n: "{{ top_n }}"
+  tasks:
+    - name: Validate that top_n is an integer
+      assert:
+        that:
+          - top_n is integer
+          - top_n | int > 0
+        fail_msg: "Parameter 'top_n' must be a positive integer."
+        success_msg: "Parameter 'top_n' is valid."
+
+    - block:
+        - name: Get top memory consuming processes
+          shell: |
+            ps -eo pid,ppid,user,cmd,%mem,%cpu --sort=-%mem | head -n {{ top_n | int + 1 }}
+          register: ps_output
+          changed_when: false
+
+        - name: Set success result
+          set_fact:
+            status_code: 1
+            response_message: "{{ ps_output.stdout }}"
+
+      rescue:
+        - name: Handle failure if ps command failed
+          set_fact:
+            status_code: 2
+            response_message: >-
+              Failed to retrieve memory utilization details.
+              Return code: {{ ps_output.rc | default('unknown') }}.
+              Error: {{ ps_output.stderr | default('no stderr captured') }}.
+
+    - name: Display result
+      debug:
+        msg:
+          status_code: "{{ status_code }}"
+          response_message: "{{ response_message }}"
