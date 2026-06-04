@@ -1,0 +1,38 @@
+---
+- name: Restart Apache HTTPD service on Linux
+  hosts: "{{ target_host }}"
+  gather_facts: false
+
+  vars:
+    apache_service_name: "{{ apache_service_name | default('httpd') }}"
+    status_code: 0
+    response_message: ""
+
+  tasks:
+
+    - name: Restart Apache service
+      ansible.builtin.service:
+        name: "{{ apache_service_name }}"
+        state: restarted
+      register: apache_restart_result
+      ignore_errors: true
+
+    - name: Set success status when restart is successful
+      ansible.builtin.set_fact:
+        status_code: 1
+        response_message: "Apache service '{{ apache_service_name }}' restarted successfully on host {{ inventory_hostname }}."
+      when: apache_restart_result is succeeded
+
+    - name: Set failure status when restart fails
+      ansible.builtin.set_fact:
+        status_code: 2
+        response_message: >-
+          Failed to restart Apache service '{{ apache_service_name }}' on host {{ inventory_hostname }}.
+          Error: {{ apache_restart_result.msg | default('Unknown error') }}
+      when: apache_restart_result is failed
+
+    - name: Final status output
+      ansible.builtin.debug:
+        msg:
+          status_code: "{{ status_code }}"
+          response_message: "{{ response_message }}"
