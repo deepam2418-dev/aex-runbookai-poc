@@ -1,5 +1,5 @@
 ---
-- name: Get top N CPU consuming processes from Windows host
+- name: Get top N CPU and Memory consuming processes from Windows host
   hosts: "{{ target_host }}"
   gather_facts: no
 
@@ -7,7 +7,7 @@
     # Mandatory variables
     status_code: 2               # 1 = success, 2 = failure (initialized to failure)
     response_message: ""
-    top_n: "{{ top_n | default(5) }}"
+    top_n: "{{ top_n }}"
 
   tasks:
 
@@ -20,15 +20,30 @@
         success_msg: "Parameter 'top_n' is valid."
       register: validation_result
 
-    - name: Get top N CPU consuming processes using PowerShell
+    - name: Get top N CPU and Memory consuming processes using PowerShell
       win_shell: |
         $topN = [int]{{ top_n }}
-        $processes = Get-Process | Sort-Object CPU -Descending | Select-Object -First $topN Name, Id, CPU
-        if (-not $processes) {
+        $allProcesses = Get-Process | Select-Object Name, Id, CPU, WS
+
+        if (-not $allProcesses) {
           Write-Output "NO_PROCESSES_FOUND"
-        } else {
-          $processes | ConvertTo-Json -Depth 3
+          exit 0
         }
+
+        $topCpu = $allProcesses |
+          Sort-Object CPU -Descending |
+          Select-Object -First $topN Name, Id, CPU, WS
+
+        $topMem = $allProcesses |
+          Sort-Object WS -Descending |
+          Select-Object -First $topN Name, Id, CPU, WS
+
+        $result = [PSCustomObject]@{
+          TopCPU = $topCpu
+          TopMemory = $topMem
+        }
+
+        $result | ConvertTo-Json -Depth 4
       register: process_info
       changed_when: false
       failed_when: false
@@ -48,9 +63,10 @@
               Return code: {{ process_info.rc }}.
               stderr: {{ process_info.stderr | default('N/A') }}.
 
-    - name: Parse process output when successful
+    - name: Handle successful retrieval
       when: not process_command_failed
       block:
+
         - name: Check if no processes were found
           set_fact:
             no_processes_found: "{{ 'NO_PROCESSES_FOUND' in (process_info.stdout | default('')) }}"
@@ -63,27 +79,55 @@
               No processes were returned from host {{ inventory_hostname }}.
               Command completed successfully but returned no data.
 
-        - name: Parse JSON output of processes
+        - name: Parse JSON output of processes (CPU + Memory)
           when: not no_processes_found
           set_fact:
             processes_parsed: "{{ process_info.stdout | from_json }}"
 
-        - name: Normalize to list if single object is returned
-          when: processes_parsed is defined and processes_parsed is mapping
+        - name: Normalize TopCPU to list if single object is returned
+          when: processes_parsed.TopCPU is defined and processes_parsed.TopCPU is mapping
           set_fact:
-            processes_parsed: "{{ [processes_parsed] }}"
+            processes_top_cpu: "{{ [processes_parsed.TopCPU] }}"
 
-        - name: Build human-readable summary of top processes
-          when: processes_parsed is defined
+        - name: Normalize TopCPU when already list
+          when: processes_parsed.TopCPU is defined and processes_parsed.TopCPU is iterable
+          set_fact:
+            processes_top_cpu: "{{ processes_parsed.TopCPU }}"
+
+        - name: Normalize TopMemory to list if single object is returned
+          when: processes_parsed.TopMemory is defined and processes_parsed.TopMemory is mapping
+          set_fact:
+            processes_top_mem: "{{ [processes_parsed.TopMemory] }}"
+
+        - name: Normalize TopMemory when already list
+          when: processes_parsed.TopMemory is defined and processes_parsed.TopMemory is iterable
+          set_fact:
+            processes_top_mem: "{{ processes_parsed.TopMemory }}"
+
+        - name: Build human-readable summary of top CPU and Memory processes
+          when: processes_top_cpu is defined or processes_top_mem is defined
           set_fact:
             processes_summary: >-
               Top {{ top_n }} CPU-consuming processes on {{ inventory_hostname }}:
-              {%- for p in processes_parsed %}
-              - Name={{ p.Name | default('N/A') }}, PID={{ p.Id | default('N/A') }}, CPU={{ p.CPU | default('N/A') }}
+              {%- if processes_top_cpu is defined %}
+              {%- for p in processes_top_cpu %}
+              - Name={{ p.Name | default('N/A') }}, PID={{ p.Id | default('N/A') }}, CPU={{ p.CPU | default('N/A') }}, WS={{ p.WS | default('N/A') }}
               {%- endfor %}
+              {%- else %}
+              (No CPU process data available)
+              {%- endif %}
+
+              Top {{ top_n }} Memory-consuming processes on {{ inventory_hostname }}:
+              {%- if processes_top_mem is defined %}
+              {%- for p in processes_top_mem %}
+              - Name={{ p.Name | default('N/A') }}, PID={{ p.Id | default('N/A') }}, CPU={{ p.CPU | default('N/A') }}, WS={{ p.WS | default('N/A') }}
+              {%- endfor %}
+              {%- else %}
+              (No Memory process data available)
+              {%- endif %}
 
         - name: Set success status and response message
-          when: processes_parsed is defined
+          when: processes_summary is defined
           set_fact:
             status_code: 1
             response_message: "{{ processes_summary }}"
