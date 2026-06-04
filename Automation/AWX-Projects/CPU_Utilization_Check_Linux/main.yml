@@ -1,11 +1,15 @@
+
+---
 - name: Get CPU utilization from Linux machine
   hosts: "{{ target_host }}"
   gather_facts: no
+
   vars:
     cpu_sample_duration: "{{ cpu_sample_duration }}"
 
   tasks:
     - block:
+
         - name: Validate cpu_sample_duration is a positive integer
           assert:
             that:
@@ -17,12 +21,12 @@
         - name: Collect CPU utilization using top
           shell: |
             CPUTIME="{{ cpu_sample_duration | int }}"
-            LC_ALL=C top -b -d "${CPUTIME}" -n 2 | awk '/^%Cpu/ {print 100 - $8}' | tail -1
+            top -b -d "${CPUTIME}" -n 2 | awk '/^%Cpu/ {print 100 - $8}' | tail -1
           args:
             warn: false
           register: cpu_cmd
-          changed: false
-          failed_when: cpu_cmd.rc != 0 or (cpu_cmd.stdout | trim | length == 0)
+          changed_when: false
+          failed_when: cpu_cmd.rc != 0 or (cpu_cmd.stdout | trim) == ""
 
         - name: Ensure CPU utilization output is numeric
           assert:
@@ -40,6 +44,7 @@
             response_message: "CPU utilization on host {{ inventory_hostname }} is {{ '%.2f' | format(cpu_utilization) }}% (sampled over {{ cpu_sample_duration }} seconds)."
 
       rescue:
+
         - name: Prepare failure result
           set_fact:
             status_code: 2
