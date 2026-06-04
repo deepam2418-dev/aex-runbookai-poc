@@ -1,0 +1,39 @@
+---
+- name: Get top CPU utilizing process from Linux host
+  hosts: "{{ target_host }}"
+  gather_facts: false
+
+  vars:
+    top_n: 1
+
+  tasks:
+    - name: Get top CPU utilizing process
+      shell: |
+        COLUMNS=300 ps -eo pid,comm,pcpu --sort=-pcpu | awk 'NR==2 {print $1"|"$2"|"$3}'
+      register: top_process_cmd
+      changed_when: false
+      failed_when: top_process_cmd.rc != 0 or top_process_cmd.stdout == ""
+
+    - name: Parse top process output
+      set_fact:
+        top_pid: "{{ top_process_cmd.stdout.split('|')[0] | default('') }}"
+        top_command: "{{ top_process_cmd.stdout.split('|')[1] | default('') }}"
+        top_cpu: "{{ top_process_cmd.stdout.split('|')[2] | default('') }}"
+
+    - name: Validate parsed process data
+      fail:
+        msg: "Failed to parse top process details from output: {{ top_process_cmd.stdout }}"
+      when: top_pid == "" or top_command == "" or top_cpu == ""
+
+    - name: Set success result
+      set_fact:
+        status_code: 1
+        response_message: >-
+          Top CPU process - PID: {{ top_pid }}, COMMAND: {{ top_command }},
+          CPU%: {{ top_cpu }}.
+
+    - name: Show result
+      debug:
+        msg:
+          status_code: "{{ status_code }}"
+          response_message: "{{ response_message }}"
