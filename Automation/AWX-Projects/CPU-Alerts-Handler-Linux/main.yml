@@ -13,6 +13,10 @@
     process_list:
       - dataprocess1
       - dataprocess
+      - taniumclient.service
+      - ir_agent
+      - nxlog
+      - mdatp.service
 
   tasks:
 
