@@ -1,0 +1,112 @@
+---
+- name: Collect disk space information from Linux host
+  hosts: "{{ target_host }}"
+  gather_facts: false
+  become: true
+  vars:
+    # Optional: restrict to specific mount points if needed in future
+    filesystem_filter: "all"   # 'all' or comma-separated list of mount points
+    command_timeout: 60
+
+  pre_tasks:
+    - name: Validate required variable - target_host
+      assert:
+        that:
+          - target_host is defined
+          - target_host | string | length > 0
+        fail_msg: "The variable 'target_host' is required and must be a non-empty string."
+        success_msg: "Variable 'target_host' is defined and valid."
+
+    - name: Validate filesystem_filter variable
+      assert:
+        that:
+          - filesystem_filter is defined
+          - filesystem_filter is string
+        fail_msg: "The variable 'filesystem_filter' must be defined and a string."
+        success_msg: "Variable 'filesystem_filter' is defined and valid."
+
+  tasks:
+    - block:
+        - name: Collect disk usage using df -P
+          ansible.builtin.command: "df -P -k"
+          register: df_output
+          changed_when: false
+          failed_when: df_output.rc != 0
+          args:
+            warn: false
+
+        - name: Parse df output into structured data
+          vars:
+            df_lines: "{{ df_output.stdout_lines[1:] | default([]) }}"
+          set_fact:
+            disk_usage_list: >-
+              {{
+                df_lines
+                | map('regex_replace', '\\s+', ' ')
+                | map('split', ' ')
+                | map('list')
+                | map('extract', 0, 6)
+                | list
+              }}
+          when: df_output.stdout_lines | length > 1
+
+        - name: Build structured disk usage dictionary
+          vars:
+            mount_filter_list: >-
+              {{
+                (filesystem_filter == 'all')
+                | ternary([], filesystem_filter.split(',') | map('trim') | list)
+              }}
+          set_fact:
+            disk_usage_structured: >-
+              {{
+                disk_usage_list
+                | map('community.general.dict_kv', 'filesystem', 0,
+                                                'blocks_kb', 1,
+                                                'used_kb', 2,
+                                                'available_kb', 3,
+                                                'use_percent', 4,
+                                                'mount_point', 5)
+                | list
+                | selectattr('mount_point', 'in', mount_filter_list)
+                  if mount_filter_list | length > 0
+                  else
+                disk_usage_list
+                | map('community.general.dict_kv', 'filesystem', 0,
+                                                'blocks_kb', 1,
+                                                'used_kb', 2,
+                                                'available_kb', 3,
+                                                'use_percent', 4,
+                                                'mount_point', 5)
+                | list
+              }}
+
+        - name: Prepare success result structure
+          set_fact:
+            disk_space_result:
+              status_code: 1
+              response_message: "Disk space information collected successfully."
+              execution_details:
+                target_host: "{{ target_host }}"
+                filesystem_filter: "{{ filesystem_filter }}"
+                raw_command: "df -P -k"
+                disk_usage: "{{ disk_usage_structured | default([]) }}"
+      rescue:
+        - name: Prepare failure result structure
+          set_fact:
+            disk_space_result:
+              status_code: 2
+              response_message: >-
+                Failed to collect disk space information.
+                Error: {{ df_output.stderr | default('Unknown error') }}
+              execution_details:
+                target_host: "{{ target_host }}"
+                filesystem_filter: "{{ filesystem_filter }}"
+                raw_command: "df -P -k"
+                error_rc: "{{ df_output.rc | default(-1) }}"
+                stderr: "{{ df_output.stderr | default('') }}"
+
+  post_tasks:
+    - name: Display disk space result
+      debug:
+        var: disk_space_result
