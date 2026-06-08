@@ -1,10 +1,14 @@
 ---
-- name: Tmp filesystem usage check on Linux
+- name: Tmp and var-tmp filesystem usage check on Linux
   hosts: "{{ target_host }}"
   gather_facts: false
 
   vars:
+    # Can still be overridden from AWX; default is 80
     threshold: 80
+    monitored_paths:
+      - /tmp
+      - /var/tmp
 
   tasks:
     - name: Validate threshold value
@@ -15,29 +19,92 @@
         fail_msg: "Threshold must be between 1 and 99"
         success_msg: "Threshold value is valid"
 
-    - name: Check /tmp filesystem usage
-      command: df -P /tmp
-      register: tmp_df
-      changed_when: false
-
-    - name: Parse /tmp filesystem usage
+    - name: Initialize per-path usage list
       set_fact:
-        tmp_usage_percent: "{{ (tmp_df.stdout_lines[1].split()[4] | regex_replace('%', '')) | int }}"
+        path_usage_details: []
 
-    - name: Set status based on /tmp usage
+    - name: Check filesystem usage for each monitored path
+      loop: "{{ monitored_paths }}"
+      loop_control:
+        loop_var: mon_path
+      block:
+        - name: Run df for {{ mon_path }}
+          command: df -P "{{ mon_path }}"
+          register: df_result
+          changed_when: false
+
+        - name: Parse usage percent for {{ mon_path }}
+          set_fact:
+            current_usage: "{{ (df_result.stdout_lines[1].split()[4] | regex_replace('%', '')) | int }}"
+
+        - name: Append usage details for {{ mon_path }}
+          set_fact:
+            path_usage_details: >-
+              {{
+                path_usage_details
+                + [ {
+                      'path': mon_path,
+                      'usage_percent': current_usage,
+                      'status': 'below_threshold'
+                                if (current_usage | int) < (threshold | int)
+                                else 'above_or_equal_threshold'
+                    } ]
+              }}
+
+      rescue:
+        - name: Append error details for {{ mon_path }} when df fails
+          set_fact:
+            path_usage_details: >-
+              {{
+                path_usage_details
+                + [ {
+                      'path': mon_path,
+                      'usage_percent': null,
+                      'status': 'error',
+                      'error_message': df_result.stderr | default('df command failed or path not accessible')
+                    } ]
+              }}
+
+    - name: Determine overall status based on monitored paths
       set_fact:
-        status_code: "{{ 1 if (tmp_usage_percent | int) < (threshold | int) else 2 }}"
+        any_above_or_equal: >-
+          {{
+            path_usage_details
+            | selectattr('status', 'equalto', 'above_or_equal_threshold')
+            | list
+            | length > 0
+          }}
+        any_error: >-
+          {{
+            path_usage_details
+            | selectattr('status', 'equalto', 'error')
+            | list
+            | length > 0
+          }}
+
+    - name: Set overall status_code and response_message
+      set_fact:
+        status_code: >-
+          {% if any_error %}
+          3
+          {% elif any_above_or_equal %}
+          2
+          {% else %}
+          1
+          {% endif %}
         response_message: >-
-          {% if (tmp_usage_percent | int) < (threshold | int) -%}
-          /tmp usage is {{ tmp_usage_percent | int }}%, below threshold {{ threshold | int }}%.
-          {%- else -%}
-          /tmp usage is {{ tmp_usage_percent | int }}%, which is greater than or equal to threshold {{ threshold | int }}%.
-          {%- endif %}
+          {% if any_error %}
+          One or more monitored paths could not be checked (df error or path not accessible).
+          {% elif any_above_or_equal %}
+          One or more monitored paths are at or above the {{ threshold | int }}% threshold.
+          {% else %}
+          All monitored paths are below the {{ threshold | int }}% threshold.
+          {% endif %}
 
-    - name: Show /tmp usage status
+    - name: Show filesystem usage status for monitored paths
       debug:
         msg:
           status_code: "{{ status_code | int }}"
           response_message: "{{ response_message }}"
-          tmp_usage_percent: "{{ tmp_usage_percent | int }}"
           threshold: "{{ threshold | int }}"
+          path_usage_details: "{{ path_usage_details }}"
