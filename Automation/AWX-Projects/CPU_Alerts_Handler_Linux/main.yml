@@ -41,11 +41,11 @@
         filtered_names: []
         process_killed: false
         final_cpu_value: "{{ current_cpu_value }}"
-        high_cpu_details: ""
-        pid_details: ""
+        high_cpu_details: "NA"
+        pid_details: "NA"
         action_details: ""
-        approved_processes: ""
-        non_approved_processes: ""
+        approved_processes: "NA"
+        non_approved_processes: "NA"
 
     # =====================================================
     # GET HIGH CPU PROCESSES
@@ -63,9 +63,10 @@
     # =====================================================
     - name: Prepare high CPU details
       set_fact:
-        high_cpu_details: "{{ high_cpu.stdout_lines | join(' | ') if high_cpu.stdout_lines is defined else 'None' }}"
+        high_cpu_details: "{{ high_cpu.stdout_lines | join(' | ') }}"
       when:
         - current_cpu_value | float >= cpu_threshold | float
+        - high_cpu.stdout_lines | length > 0
 
     # =====================================================
     # FILTER APPROVED PROCESSES
@@ -102,7 +103,7 @@
     # =====================================================
     - name: Prepare PID details
       set_fact:
-        pid_details: "{{ filtered_pids | join(', ') if filtered_pids | length > 0 else 'None' }}"
+        pid_details: "{{ filtered_pids | join(', ') if filtered_pids | length > 0 else 'NA' }}"
       when:
         - current_cpu_value | float >= cpu_threshold | float
 
@@ -111,7 +112,7 @@
     # =====================================================
     - name: Approved processes
       set_fact:
-        approved_processes: "{{ filtered_names | unique | join(', ') if filtered_names | length > 0 else 'None' }}"
+        approved_processes: "{{ filtered_names | unique | join(', ') if filtered_names | length > 0 else 'NA' }}"
       when:
         - current_cpu_value | float >= cpu_threshold | float
 
@@ -125,7 +126,7 @@
             | difference(process_list)
             | unique
             | join(', ')
-            if high_cpu.stdout_lines is defined else 'None'
+            if high_cpu.stdout_lines | length > 0 else 'NA'
           }}
       when:
         - current_cpu_value | float >= cpu_threshold | float
@@ -148,7 +149,9 @@
     - name: Prepare action details
       set_fact:
         action_details: >-
-          {% if filtered_pids | length > 0 %}
+          {% if current_cpu_value < cpu_threshold %}
+          CPU Utilization is within acceptable threshold. No remediation required.
+          {% elif filtered_pids | length > 0 %}
           Killed processes: {{ filtered_pids | join(', ') }}
           {% else %}
           No approved processes found for termination
@@ -159,6 +162,8 @@
     # =====================================================
     - name: Restart dataprocess
       shell: nohup /home/svc_agenticai@ivhinc.com/script/dataprocess1.sh &
+      when:
+        - filtered_pids | length > 0
 
     - name: Set remediation status
       set_fact:
@@ -198,30 +203,46 @@
       set_fact:
         status_code: >-
           {{
-            1 if (final_cpu_value | float) < (cpu_threshold | float)
-            else 2
+            0 if (current_cpu_value < cpu_threshold)
+            else (1 if final_cpu_value < cpu_threshold else 2)
           }}
 
     # =====================================================
-    # FINAL RESPONSE (POINT-WISE WITH NEW LINE)
+    # FINAL RESPONSE
     # =====================================================
     - name: Set response message
       set_fact:
         response_message: >-
-          {% if current_cpu_value | float < cpu_threshold | float %}
+          {% if current_cpu_value < cpu_threshold %}
           1. CPU Status: CPU Utilization is within acceptable threshold. No remediation required.
 
-          {% elif final_cpu_value | float < cpu_threshold | float %}
+          2. CPU Usage Before Remediation: {{ current_cpu_value }}%
+
+          3. CPU Usage After Remediation: NA
+
+          4. High CPU Processes: NA
+
+          5. Approved Processes: NA
+
+          6. Non-Approved Processes: NA
+
+          7. Process IDs (PIDs): NA
+
+          8. Action Taken: CPU Utilization is within acceptable threshold. No remediation required.
+
+          {% elif final_cpu_value < cpu_threshold %}
           1. CPU Status: High CPU utilization detected and successfully reduced after remediation.
+
           {% else %}
           1. CPU Status: High CPU utilization persists even after remediation. Escalation required.
 
           {% endif %}
+          {% if current_cpu_value >= cpu_threshold %}
           2. CPU Usage Before Remediation: {{ current_cpu_value }}%
 
           3. CPU Usage After Remediation: {{ final_cpu_value }}%
 
-          4. High CPU Processes: {{ high_cpu_details }}
+          4. High CPU Processes: {{ high_cpu_details | default('NA') }}
 
           5. Approved Processes: {{ approved_processes }}
 
@@ -230,6 +251,7 @@
           7. Process IDs (PIDs): {{ pid_details }}
 
           8. Action Taken: {{ action_details }}
+          {% endif %}
 
     # =====================================================
     # DISPLAY
@@ -239,21 +261,3 @@
         msg:
           status_code: "{{ status_code }}"
           response_message: "{{ response_message }}"
-
-    # =====================================================
-    # IAUTOMATE UPDATE
-    # =====================================================
-    - name: Update iautomate status
-      uri:
-        url: "http://10.224.11.147:8080/v2/runbooks/orgentityid/1/updaterunbookstatusv2"
-        validate_certs: no
-        user: "iautomate@syneoshealth.com"
-        password: "Yy9%HyZW"
-        method: PUT
-        status_code: 200
-        return_content: yes
-        force_basic_auth: yes
-        body_format: json
-        body: "{{ lookup('template','status.json.j2') }}"
-      delegate_to: localhost
-      become: no
