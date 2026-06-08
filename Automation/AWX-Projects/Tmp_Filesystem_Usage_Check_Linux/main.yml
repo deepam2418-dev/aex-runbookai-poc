@@ -4,8 +4,8 @@
   gather_facts: false
 
   vars:
-    # Can still be overridden from AWX; default is 80
-    threshold: 80
+    # Can still be overridden from AWX; default is 90
+    threshold: 90
     monitored_paths:
       - /tmp
       - /var/tmp
