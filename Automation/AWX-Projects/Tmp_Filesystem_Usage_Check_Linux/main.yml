@@ -7,11 +7,15 @@
     threshold: "{{ threshold | default(80) }}"
 
   tasks:
+    - name: Set effective threshold
+      set_fact:
+        effective_threshold: "{{ (threshold | default(80)) | int }}"
+
     - name: Validate threshold value
       assert:
         that:
-          - threshold | int > 0
-          - threshold | int < 100
+          - effective_threshold > 0
+          - effective_threshold < 100
         fail_msg: "Threshold must be between 1 and 99"
         success_msg: "Threshold value is valid"
 
@@ -26,12 +30,12 @@
 
     - name: Set status based on /tmp usage
       set_fact:
-        status_code: "{{ 1 if tmp_usage_percent < (threshold | int) else 2 }}"
+        status_code: "{{ 1 if tmp_usage_percent < effective_threshold else 2 }}"
         response_message: >-
-          {% if tmp_usage_percent < (threshold | int) -%}
-          /tmp usage is {{ tmp_usage_percent }}%, below threshold {{ threshold }}%.
+          {% if tmp_usage_percent < effective_threshold -%}
+          /tmp usage is {{ tmp_usage_percent }}%, below threshold {{ effective_threshold }}%.
           {%- else -%}
-          /tmp usage is {{ tmp_usage_percent }}%, which is greater than or equal to threshold {{ threshold }}%.
+          /tmp usage is {{ tmp_usage_percent }}%, which is greater than or equal to threshold {{ effective_threshold }}%.
           {%- endif %}
 
     - name: Show /tmp usage status
@@ -40,4 +44,4 @@
           status_code: "{{ status_code }}"
           response_message: "{{ response_message }}"
           tmp_usage_percent: "{{ tmp_usage_percent }}"
-          threshold: "{{ threshold }}"
+          threshold: "{{ effective_threshold }}"
