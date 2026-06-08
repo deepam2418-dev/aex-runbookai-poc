@@ -4,7 +4,6 @@
   gather_facts: false
   become: true
   vars:
-    # Optional: restrict to specific mount points if needed in future
     filesystem_filter: "all"   # 'all' or comma-separated list of mount points
     command_timeout: 60
 
@@ -31,9 +30,7 @@
           ansible.builtin.command: "df -P -k"
           register: df_output
           changed_when: false
-          failed_when: df_output.rc != 0
-          args:
-            warn: false
+          failed_when: df_output is failed
 
         - name: Parse df output into structured data
           vars:
