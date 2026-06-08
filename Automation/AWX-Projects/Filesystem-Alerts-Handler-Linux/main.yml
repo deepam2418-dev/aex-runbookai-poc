@@ -158,8 +158,7 @@
           }}
 
     # =====================================================
-    # FINAL RESPONSE (POINT-WISE + 
-)
+    # ✅ FIXED RESPONSE (NO YAML ERROR)
     # =====================================================
     - name: Set response message
       set_fact:
@@ -194,21 +193,3 @@
         msg:
           status_code: "{{ status_code }}"
           response_message: "{{ response_message }}"
-
-    # =====================================================
-    # UPDATE IAUTOMATE STATUS
-    # =====================================================
-    - name: Update iautomate url about status
-      uri:
-        url: "http://10.224.11.147:8080/v2/runbooks/orgentityid/1/updaterunbookstatusv2"
-        validate_certs: no
-        user: "iautomate@syneoshealth.com"
-        password: "Yy9%HyZW"
-        method: PUT
-        status_code: 200
-        return_content: yes
-        force_basic_auth: yes
-        body_format: json
-        body: "{{lookup('template','status.json.j2')}}"
-      delegate_to: localhost
-      become: no
