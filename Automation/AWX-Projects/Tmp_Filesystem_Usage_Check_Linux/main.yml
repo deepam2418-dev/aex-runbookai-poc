@@ -4,12 +4,12 @@
   gather_facts: false
 
   vars:
-    threshold: "{{ threshold | default(80) }}"
+    threshold: "{{ threshold | default(omit) }}"
 
   tasks:
     - name: Set effective threshold
       set_fact:
-        effective_threshold: "{{ (threshold | default(80)) | int }}"
+        effective_threshold: "{{ (threshold is defined and (threshold | string) | length > 0) | ternary(threshold | int, 80) }}"
 
     - name: Validate threshold value
       assert:
