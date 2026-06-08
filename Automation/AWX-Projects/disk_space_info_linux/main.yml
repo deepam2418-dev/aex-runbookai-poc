@@ -45,19 +45,18 @@
           vars:
             # Normalize whitespace, split into fields
             fields: "{{ (item | regex_replace('\\s+', ' ') | trim).split(' ') }}"
-            fields_len: "{{ fields | length }}"
-            # Only process lines that look like valid df rows (>= 6 fields)
-            valid_line: "{{ fields_len >= 6 }}"
-            filesystem: "{{ valid_line | ternary(fields[0], omit) }}"
-            blocks_kb_raw: "{{ valid_line | ternary(fields[1], omit) }}"
-            used_kb_raw: "{{ valid_line | ternary(fields[2], omit) }}"
-            available_kb_raw: "{{ valid_line | ternary(fields[3], omit) }}"
-            use_percent_raw: "{{ valid_line | ternary(fields[4], omit) }}"
+            # Force integer length for comparison
+            fields_len_int: "{{ (fields | length) | int }}"
+            valid_line: "{{ fields_len_int >= 6 }}"
+
+            filesystem: "{{ fields[0] if valid_line else omit }}"
+            blocks_kb_raw: "{{ fields[1] if valid_line else omit }}"
+            used_kb_raw: "{{ fields[2] if valid_line else omit }}"
+            available_kb_raw: "{{ fields[3] if valid_line else omit }}"
+            use_percent_raw: "{{ fields[4] if valid_line else omit }}"
             mount_point_raw: >-
-              {{ valid_line | ternary(
-                   (fields[5:]) | join(' '),
-                   omit
-                 ) }}
+              {{ (fields[5:] | join(' ')) if valid_line else omit }}
+
             # Coerce numeric fields where possible; keep raw if not numeric
             blocks_kb: >-
               {{ (blocks_kb_raw is match('^[0-9]+$')) | ternary(blocks_kb_raw | int, blocks_kb_raw) }}
