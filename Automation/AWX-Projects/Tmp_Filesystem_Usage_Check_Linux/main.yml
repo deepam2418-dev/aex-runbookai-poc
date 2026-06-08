@@ -24,9 +24,9 @@
         path_usage_details: []
 
     - name: Check filesystem usage for each monitored path
+      vars:
+        mon_path: "{{ item }}"
       loop: "{{ monitored_paths }}"
-      loop_control:
-        loop_var: mon_path
       block:
         - name: Run df for {{ mon_path }}
           command: df -P "{{ mon_path }}"
@@ -50,7 +50,6 @@
                                 else 'above_or_equal_threshold'
                     } ]
               }}
-
       rescue:
         - name: Append error details for {{ mon_path }} when df fails
           set_fact:
