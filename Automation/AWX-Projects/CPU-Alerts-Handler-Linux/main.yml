@@ -46,7 +46,7 @@
         process_killed: false
         final_cpu_value: "{{ current_cpu_value }}"
 
-        # ✅ NEW VARIABLES
+        #  NEW VARIABLES
         high_cpu_details: ""
         pid_details: ""
         action_details: ""
@@ -100,7 +100,7 @@
         - current_cpu_value | float >= cpu_threshold | float
 
     # =====================================================
-    # ✅ NEW: PREPARE WORKNOTES DETAILS
+    # NEW: PREPARE WORKNOTES DETAILS
     # =====================================================
     - name: Prepare high CPU details
       set_fact:
@@ -127,7 +127,7 @@
         - filtered_pids | length > 0
 
     # =====================================================
-    # ✅ NEW: ACTION DETAILS
+    # NEW: ACTION DETAILS
     # =====================================================
     - name: Prepare action details
       set_fact:
@@ -176,7 +176,7 @@
         - process_killed | bool
 
     # =====================================================
-    # ✅ NEW: CPU AFTER DETAILS
+    # NEW: CPU AFTER DETAILS
     # =====================================================
     - name: Prepare CPU after details
       set_fact:
