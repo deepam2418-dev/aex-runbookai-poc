@@ -23,46 +23,42 @@
       set_fact:
         path_usage_details: []
 
-    - name: Check filesystem usage for each monitored path
-      vars:
-        mon_path: "{{ item }}"
+    - name: Run df for monitored paths
+      command: df -P "{{ item }}"
+      register: df_results
+      changed_when: false
+      failed_when: false
       loop: "{{ monitored_paths }}"
-      block:
-        - name: Run df for {{ mon_path }}
-          command: df -P "{{ mon_path }}"
-          register: df_result
-          changed_when: false
 
-        - name: Parse usage percent for {{ mon_path }}
-          set_fact:
-            current_usage: "{{ (df_result.stdout_lines[1].split()[4] | regex_replace('%', '')) | int }}"
-
-        - name: Append usage details for {{ mon_path }}
-          set_fact:
-            path_usage_details: >-
-              {{
-                path_usage_details
-                + [ {
-                      'path': mon_path,
-                      'usage_percent': current_usage,
-                      'status': 'below_threshold'
-                                if (current_usage | int) < (threshold | int)
-                                else 'above_or_equal_threshold'
-                    } ]
-              }}
-      rescue:
-        - name: Append error details for {{ mon_path }} when df fails
-          set_fact:
-            path_usage_details: >-
-              {{
-                path_usage_details
-                + [ {
-                      'path': mon_path,
-                      'usage_percent': null,
-                      'status': 'error',
-                      'error_message': df_result.stderr | default('df command failed or path not accessible')
-                    } ]
-              }}
+    - name: Build usage details per path
+      set_fact:
+        path_usage_details: >-
+          {{
+            path_usage_details
+            + [ {
+                  'path': item.item,
+                  'usage_percent': (
+                    (item.stdout_lines[1].split()[4] | regex_replace('%', '')) | int
+                  ) if (item.rc == 0 and item.stdout_lines | length > 1) else None,
+                  'status': (
+                    'below_threshold'
+                    if (item.rc == 0
+                        and item.stdout_lines | length > 1
+                        and ((item.stdout_lines[1].split()[4] | regex_replace('%', '')) | int) < (threshold | int))
+                    else (
+                      'above_or_equal_threshold'
+                      if (item.rc == 0
+                          and item.stdout_lines | length > 1
+                          and ((item.stdout_lines[1].split()[4] | regex_replace('%', '')) | int) >= (threshold | int))
+                      else 'error'
+                    )
+                  ),
+                  'error_message': (
+                    item.stderr | default('df command failed or path not accessible')
+                  ) if (item.rc != 0 or item.stdout_lines | length <= 1) else None
+                } ]
+          }}
+      loop: "{{ df_results.results }}"
 
     - name: Determine overall status based on monitored paths
       set_fact:
