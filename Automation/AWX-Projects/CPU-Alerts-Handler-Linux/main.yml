@@ -203,30 +203,30 @@
           }}
 
     # =====================================================
-    # FINAL RESPONSE (UPDATED WORDING)
+    # FINAL RESPONSE (POINT-WISE WITH NEW LINE)
     # =====================================================
     - name: Set response message
       set_fact:
         response_message: >-
           {% if current_cpu_value | float < cpu_threshold | float %}
-          1. CPU Utilization is within acceptable threshold. No remediation required.
+          1. CPU Status: Normal (Below Threshold)
 
           {% elif final_cpu_value | float < cpu_threshold | float %}
-          1. High CPU utilization detected and successfully reduced after remediation.
+          1. CPU Status: Issue Resolved After Remediation
 
           {% else %}
-          1. High CPU utilization persists even after remediation. Escalation required.
+          1. CPU Status: Still High - Escalation Required
 
           {% endif %}
-          2. CPU Usage Before Remediation: {{ current_cpu_value }}%
+          2. CPU Before: {{ current_cpu_value }}%
 
-          3. CPU Usage After Remediation: {{ final_cpu_value }}%
+          3. CPU After: {{ final_cpu_value }}%
 
-          4. High CPU Processes Identified: {{ high_cpu_details }}
+          4. High CPU Processes: {{ high_cpu_details }}
 
-          5. Approved Processes (Eligible for Auto-Remediation): {{ approved_processes }}
+          5. Approved Processes: {{ approved_processes }}
 
-          6. Non-Approved Processes (No Action Taken): {{ non_approved_processes }}
+          6. Non-Approved Processes: {{ non_approved_processes }}
 
           7. Process IDs (PIDs): {{ pid_details }}
 
@@ -240,4 +240,21 @@
         msg:
           status_code: "{{ status_code }}"
           response_message: "{{ response_message }}"
- 
+
+    # =====================================================
+    # IAUTOMATE UPDATE
+    # =====================================================
+    - name: Update iautomate status
+      uri:
+        url: "http://10.224.11.147:8080/v2/runbooks/orgentityid/1/updaterunbookstatusv2"
+        validate_certs: no
+        user: "iautomate@syneoshealth.com"
+        password: "Yy9%HyZW"
+        method: PUT
+        status_code: 200
+        return_content: yes
+        force_basic_auth: yes
+        body_format: json
+        body: "{{ lookup('template','status.json.j2') }}"
+      delegate_to: localhost
+      become: no
