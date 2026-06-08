@@ -45,39 +45,29 @@
           vars:
             # Normalize whitespace, split into fields
             fields: "{{ (item | regex_replace('\\s+', ' ') | trim).split(' ') }}"
-            # Force integer length for comparison
-            fields_len_int: "{{ (fields | length) | int }}"
-            valid_line: "{{ fields_len_int >= 6 }}"
-
-            filesystem: "{{ fields[0] if valid_line else omit }}"
-            blocks_kb_raw: "{{ fields[1] if valid_line else omit }}"
-            used_kb_raw: "{{ fields[2] if valid_line else omit }}"
-            available_kb_raw: "{{ fields[3] if valid_line else omit }}"
-            use_percent_raw: "{{ fields[4] if valid_line else omit }}"
-            mount_point_raw: >-
-              {{ (fields[5:] | join(' ')) if valid_line else omit }}
-
-            # Coerce numeric fields where possible; keep raw if not numeric
-            blocks_kb: >-
-              {{ (blocks_kb_raw is match('^[0-9]+$')) | ternary(blocks_kb_raw | int, blocks_kb_raw) }}
-            used_kb: >-
-              {{ (used_kb_raw is match('^[0-9]+$')) | ternary(used_kb_raw | int, used_kb_raw) }}
-            available_kb: >-
-              {{ (available_kb_raw is match('^[0-9]+$')) | ternary(available_kb_raw | int, available_kb_raw) }}
-            use_percent: "{{ use_percent_raw }}"
-            mount_point: "{{ mount_point_raw }}"
+            fields_len: "{{ fields | length }}"
 
             item_structured: >-
               {{
                 {
-                  "filesystem": filesystem,
-                  "blocks_kb": blocks_kb,
-                  "used_kb": used_kb,
-                  "available_kb": available_kb,
-                  "use_percent": use_percent,
-                  "mount_point": mount_point
+                  "filesystem": fields[0],
+                  "blocks_kb": (
+                    (fields[1] is match('^[0-9]+$'))
+                    | ternary(fields[1] | int, fields[1])
+                  ),
+                  "used_kb": (
+                    (fields[2] is match('^[0-9]+$'))
+                    | ternary(fields[2] | int, fields[2])
+                  ),
+                  "available_kb": (
+                    (fields[3] is match('^[0-9]+$'))
+                    | ternary(fields[3] | int, fields[3])
+                  ),
+                  "use_percent": fields[4],
+                  "mount_point": (fields[5:] | join(' '))
                 }
-                if valid_line else omit
+                if fields_len | int >= 6
+                else omit
               }}
 
         - name: Apply filesystem filter if not 'all'
