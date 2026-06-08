@@ -175,8 +175,8 @@
       set_fact:
         status_code: >-
           {{
-            0 if ((current_cpu_value < cpu_threshold) or (final_cpu_value | float < cpu_threshold))
-            else 1
+            1 if ((current_cpu_value < cpu_threshold) or (final_cpu_value | float < cpu_threshold))
+            else 2
           }}
 
     # =====================================================
