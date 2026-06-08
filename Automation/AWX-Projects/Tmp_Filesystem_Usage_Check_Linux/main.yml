@@ -4,102 +4,160 @@
   gather_facts: false
 
   vars:
-    # Can still be overridden from AWX; default is 90
-    threshold: 90
+    # Job lifecycle status variables
+    status_code: 0
+    response_message: "Automation execution is in progress."
+
+    # Default threshold updated as requested (can still be overridden from AWX)
+    threshold: 70
+
+    # Default monitored paths
     monitored_paths:
       - /tmp
       - /var/tmp
 
   tasks:
-    - name: Validate threshold value
-      assert:
-        that:
-          - (threshold | int) > 0
-          - (threshold | int) < 100
-        fail_msg: "Threshold must be between 1 and 99"
-        success_msg: "Threshold value is valid"
+    - name: Run pre execution lifecycle role
+      ansible.builtin.include_role:
+        name: Job_Pre_Execution
+      vars:
+        status_code: "{{ status_code }}"
+        response_message: "{{ response_message }}"
 
-    - name: Initialize per-path usage list
-      set_fact:
-        path_usage_details: []
+    - name: Main automation block - tmp usage check
+      block:
+        - name: Validate required parameters
+          ansible.builtin.assert:
+            that:
+              - target_host is defined
+              - (target_host | string | length) > 0
+            fail_msg: "Required parameter 'target_host' is missing or empty."
+            success_msg: "Required parameters validated successfully."
 
-    - name: Run df for monitored paths
-      command: df -P "{{ item }}"
-      register: df_results
-      changed_when: false
-      failed_when: false
-      loop: "{{ monitored_paths }}"
+        - name: Validate threshold value
+          ansible.builtin.assert:
+            that:
+              - (threshold | int) > 0
+              - (threshold | int) < 100
+            fail_msg: "Threshold must be between 1 and 99."
+            success_msg: "Threshold value is valid."
 
-    - name: Build usage details per path
-      set_fact:
-        path_usage_details: >-
-          {{
-            path_usage_details
-            + [ {
-                  'path': item.item,
-                  'usage_percent': (
-                    (item.stdout_lines[1].split()[4] | regex_replace('%', '')) | int
-                  ) if (item.rc == 0 and item.stdout_lines | length > 1) else None,
-                  'status': (
-                    'below_threshold'
-                    if (item.rc == 0
-                        and item.stdout_lines | length > 1
-                        and ((item.stdout_lines[1].split()[4] | regex_replace('%', '')) | int) < (threshold | int))
-                    else (
-                      'above_or_equal_threshold'
-                      if (item.rc == 0
-                          and item.stdout_lines | length > 1
-                          and ((item.stdout_lines[1].split()[4] | regex_replace('%', '')) | int) >= (threshold | int))
-                      else 'error'
-                    )
-                  ),
-                  'error_message': (
-                    item.stderr | default('df command failed or path not accessible')
-                  ) if (item.rc != 0 or item.stdout_lines | length <= 1) else None
-                } ]
-          }}
-      loop: "{{ df_results.results }}"
+        - name: Update job status - parameter and threshold validation completed
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: "Parameter and threshold validation completed successfully. Automation is in progress."
 
-    - name: Determine overall status based on monitored paths
-      set_fact:
-        any_above_or_equal: >-
-          {{
-            path_usage_details
-            | selectattr('status', 'equalto', 'above_or_equal_threshold')
-            | list
-            | length > 0
-          }}
-        any_error: >-
-          {{
-            path_usage_details
-            | selectattr('status', 'equalto', 'error')
-            | list
-            | length > 0
-          }}
+        - name: Initialize per-path usage list
+          ansible.builtin.set_fact:
+            path_usage_details: []
 
-    - name: Set overall status_code and response_message
-      set_fact:
-        status_code: >-
-          {% if any_error %}
-          3
-          {% elif any_above_or_equal %}
-          2
-          {% else %}
-          1
-          {% endif %}
-        response_message: >-
-          {% if any_error %}
-          One or more monitored paths could not be checked (df error or path not accessible).
-          {% elif any_above_or_equal %}
-          One or more monitored paths are at or above the {{ threshold | int }}% threshold.
-          {% else %}
-          All monitored paths are below the {{ threshold | int }}% threshold.
-          {% endif %}
+        - name: Run df for monitored paths
+          ansible.builtin.command: df -P "{{ item }}"
+          register: df_results
+          changed_when: false
+          failed_when: false
+          loop: "{{ monitored_paths }}"
 
-    - name: Show filesystem usage status for monitored paths
-      debug:
-        msg:
-          status_code: "{{ status_code | int }}"
-          response_message: "{{ response_message }}"
-          threshold: "{{ threshold | int }}"
-          path_usage_details: "{{ path_usage_details }}"
+        - name: Build usage details per path
+          ansible.builtin.set_fact:
+            path_usage_details: >-
+              {{
+                path_usage_details
+                + [ {
+                      'path': item.item,
+                      'usage_percent': (
+                        (item.stdout_lines[1].split()[4] | regex_replace('%', '')) | int
+                      ) if (item.rc == 0 and item.stdout_lines | length > 1) else None,
+                      'status': (
+                        'below_threshold'
+                        if (item.rc == 0
+                            and item.stdout_lines | length > 1
+                            and ((item.stdout_lines[1].split()[4] | regex_replace('%', '')) | int) < (threshold | int))
+                        else (
+                          'above_or_equal_threshold'
+                          if (item.rc == 0
+                              and item.stdout_lines | length > 1
+                              and ((item.stdout_lines[1].split()[4] | regex_replace('%', '')) | int) >= (threshold | int))
+                          else 'error'
+                        )
+                      ),
+                      'error_message': (
+                        item.stderr | default('df command failed or path not accessible')
+                      ) if (item.rc != 0 or item.stdout_lines | length <= 1) else None
+                    } ]
+              }}
+          loop: "{{ df_results.results }}"
+
+        - name: Determine overall status based on monitored paths
+          ansible.builtin.set_fact:
+            any_above_or_equal: >-
+              {{
+                path_usage_details
+                | selectattr('status', 'equalto', 'above_or_equal_threshold')
+                | list
+                | length > 0
+              }}
+            any_error: >-
+              {{
+                path_usage_details
+                | selectattr('status', 'equalto', 'error')
+                | list
+                | length > 0
+              }}
+
+        - name: Set overall status_code and response_message
+          ansible.builtin.set_fact:
+            status_code: >-
+              {% if any_error %}
+              -1
+              {% elif any_above_or_equal %}
+              2
+              {% else %}
+              1
+              {% endif %}
+            response_message: >-
+              {% if any_error %}
+              Automation execution was not successful for one or more monitored paths (df error or path not accessible). The issue is being transferred for manual review.
+              {% elif any_above_or_equal %}
+              One or more monitored paths are at or above the {{ threshold | int }}% threshold. The issue is being transferred for further action.
+              {% else %}
+              Automation completed successfully. All monitored paths are below the {{ threshold | int }}% threshold and the issue has been resolved.
+              {% endif %}
+
+        - name: Update job status - main tmp usage evaluation completed
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
+
+        - name: Show filesystem usage status for monitored paths
+          ansible.builtin.debug:
+            msg:
+              status_code: "{{ status_code }}"
+              response_message: "{{ response_message }}"
+              threshold: "{{ threshold | int }}"
+              path_usage_details: "{{ path_usage_details }}"
+
+      rescue:
+        - name: Set failed and transferred status due to unexpected error
+          ansible.builtin.set_fact:
+            status_code: -1
+            response_message: "Automation execution encountered an unexpected error. The issue is being transferred for manual review."
+
+        - name: Update job status - execution not successful and transferred
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
+
+      always:
+        - name: Run post execution lifecycle role
+          ansible.builtin.include_role:
+            name: Job_Post_Execution
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
