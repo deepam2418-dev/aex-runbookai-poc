@@ -9,7 +9,6 @@
   vars:
     cpu_threshold: "{{ threshold | default(80) }}"
 
-    # Approved processes for auto remediation
     process_list:
       - dataprocess1
       - dataprocess
@@ -47,6 +46,12 @@
         process_killed: false
         final_cpu_value: "{{ current_cpu_value }}"
 
+        # ✅ NEW VARIABLES
+        high_cpu_details: ""
+        pid_details: ""
+        action_details: ""
+        cpu_after_details: ""
+
     # =====================================================
     # GET HIGH CPU PROCESSES
     # =====================================================
@@ -79,12 +84,6 @@
       when:
         - current_cpu_value | float >= cpu_threshold | float
 
-    - name: Display filtered processes
-      debug:
-        msg: "{{ filtered_processes }}"
-      when:
-        - current_cpu_value | float >= cpu_threshold | float
-
     # =====================================================
     # EXTRACT PROCESS DETAILS
     # =====================================================
@@ -100,9 +99,18 @@
       when:
         - current_cpu_value | float >= cpu_threshold | float
 
-    - name: Display filtered process IDs
-      debug:
-        msg: "{{ filtered_pids }}"
+    # =====================================================
+    # ✅ NEW: PREPARE WORKNOTES DETAILS
+    # =====================================================
+    - name: Prepare high CPU details
+      set_fact:
+        high_cpu_details: "{{ high_cpu.stdout_lines | join(' | ') if high_cpu.stdout_lines is defined else 'No high CPU processes' }}"
+      when:
+        - current_cpu_value | float >= cpu_threshold | float
+
+    - name: Prepare PID details
+      set_fact:
+        pid_details: "{{ filtered_pids | join(', ') if filtered_pids | length > 0 else 'No PIDs identified' }}"
       when:
         - current_cpu_value | float >= cpu_threshold | float
 
@@ -119,18 +127,22 @@
         - filtered_pids | length > 0
 
     # =====================================================
+    # ✅ NEW: ACTION DETAILS
+    # =====================================================
+    - name: Prepare action details
+      set_fact:
+        action_details: >-
+          {% if filtered_pids | length > 0 %}
+          Killed processes: {{ filtered_pids | join(', ') }}
+          {% else %}
+          No approved processes found for termination
+          {% endif %}
+
+    # =====================================================
     # RESTART DATAPROCESS
     # =====================================================
     - name: Restart dataprocess
       shell: nohup /home/svc_agenticai@ivhinc.com/script/dataprocess1.sh &
-      register: restart_result
-      
-
-    - name: Display restart output
-      debug:
-        var: restart_result.stdout_lines
-      when:
-        - "'dataprocess1' in filtered_names"
 
     - name: Set remediation status
       set_fact:
@@ -139,7 +151,7 @@
         - filtered_pids | length > 0
 
     # =====================================================
-    # WAIT FOR PROCESS STARTUP
+    # WAIT
     # =====================================================
     - name: Wait for dataprocess startup
       pause:
@@ -148,7 +160,7 @@
         - process_killed | bool
 
     # =====================================================
-    # RECHECK CPU AFTER REMEDIATION
+    # RECHECK CPU
     # =====================================================
     - name: Get overall CPU usage after remediation
       shell: "top -bn1 | grep 'Cpu(s)' | awk '{print 100 - $8}'"
@@ -163,9 +175,12 @@
       when:
         - process_killed | bool
 
-    - name: Print final CPU usage
-      debug:
-        msg: "Current CPU Usage: {{ final_cpu_value }}%"
+    # =====================================================
+    # ✅ NEW: CPU AFTER DETAILS
+    # =====================================================
+    - name: Prepare CPU after details
+      set_fact:
+        cpu_after_details: "Post action CPU utilization: {{ final_cpu_value }}%"
 
     # =====================================================
     # STATUS CODE
@@ -180,21 +195,25 @@
           }}
 
     # =====================================================
-    # RESPONSE MESSAGE
+    # RESPONSE MESSAGE (UPDATED)
     # =====================================================
     - name: Set response message
       set_fact:
         response_message: >-
           {% if current_cpu_value | float < cpu_threshold | float %}
-          Current CPU utilization on host {{ hostname }} is {{ current_cpu_value }}%, which is below the configured threshold of {{ cpu_threshold }}%. No remediation was required. Marking the ticket as resolved.
+          CPU {{ current_cpu_value }}% below threshold {{ cpu_threshold }}%. No action required.
           {% elif final_cpu_value | float < cpu_threshold | float %}
-          CPU usage on host {{ hostname }} exceeded the configured threshold of {{ cpu_threshold }}%. Approved high CPU processes identified: {{ filtered_names | unique | join(', ') if filtered_names | length > 0 else 'None' }}. Post-remediation CPU utilization is {{ final_cpu_value }}%. dataprocess service restared. CPU utilization returned to normal levels. Marking the ticket as resolved.
+          CPU exceeded threshold. Processes: {{ filtered_names | join(', ') if filtered_names else 'None' }}. CPU normalized.
           {% else %}
-          CPU usage on host {{ hostname }} exceeded the configured threshold of {{ cpu_threshold }}%. Approved high CPU processes identified: {{ filtered_names | unique | join(', ') if filtered_names | length > 0 else 'None' }}. Post-remediation CPU utilization remains at {{ final_cpu_value }}%, which is still above threshold. Escalating the ticket for further investigation.
+          CPU still high after remediation. Escalation required.
           {% endif %}
+          | High CPU: {{ high_cpu_details | default('NA') }}
+          | PIDs: {{ pid_details | default('NA') }}
+          | Action: {{ action_details | default('NA') }}
+          | CPU After: {{ cpu_after_details | default('NA') }}
 
     # =====================================================
-    # DISPLAY FINAL RESPONSE
+    # DISPLAY
     # =====================================================
     - name: Display final response
       debug:
@@ -203,7 +222,7 @@
           response_message: "{{ response_message }}"
 
     # =====================================================
-    # UPDATE IAUTOMATE STATUS
+    # IAUTOMATE UPDATE
     # =====================================================
     - name: Update iautomate url about status
       uri:
