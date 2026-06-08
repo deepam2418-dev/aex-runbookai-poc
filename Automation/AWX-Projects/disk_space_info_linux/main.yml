@@ -3,8 +3,10 @@
   hosts: "{{ target_host }}"
   gather_facts: false
   become: true
+
   vars:
-    filesystem_filter: "all"   # 'all' or comma-separated list of mount points
+    # 'all' or comma-separated list of mount points (e.g. "/,/var,/opt")
+    filesystem_filter: "all"
     command_timeout: 60
 
   pre_tasks:
@@ -26,63 +28,69 @@
 
   tasks:
     - block:
-        - name: Collect raw df output
+        - name: Collect df output in POSIX portable format (KB)
           ansible.builtin.command: "df -P -k"
           register: df_output
           changed_when: false
           failed_when: df_output.rc != 0
 
-        - name: Parse df output to JSON via Python helper
-          ansible.builtin.command: >-
-            python3 - << 'EOF'
-            import json
-            import sys
-
-            raw = '''{{ df_output.stdout | replace("'", "'\''") }}'''.splitlines()
-            # Skip header
-            lines = raw[1:]
-            results = []
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
-                parts = line.split()
-                # Expect at least 6 fields: filesystem, blocks, used, available, use%, mount
-                if len(parts) < 6:
-                    # Skip malformed lines
-                    continue
-                filesystem = parts[0]
-                blocks_kb = parts[1]
-                used_kb = parts[2]
-                available_kb = parts[3]
-                use_percent = parts[4]
-                mount_point = " ".join(parts[5:])
-                results.append({
-                    "filesystem": filesystem,
-                    "blocks_kb": int(blocks_kb) if blocks_kb.isdigit() else blocks_kb,
-                    "used_kb": int(used_kb) if used_kb.isdigit() else used_kb,
-                    "available_kb": int(available_kb) if available_kb.isdigit() else available_kb,
-                    "use_percent": use_percent,
-                    "mount_point": mount_point,
-                })
-
-            print(json.dumps(results))
-            EOF
-          register: df_parsed
-          changed_when: false
-
-        - name: Load parsed JSON into Ansible fact
+        - name: Initialize disk_usage list
           set_fact:
-            disk_usage_all: "{{ df_parsed.stdout | from_json }}"
+            disk_usage_list: []
+
+        - name: Build structured disk usage list from df output
+          set_fact:
+            disk_usage_list: "{{ disk_usage_list + [item_structured] }}"
+          loop: "{{ df_output.stdout_lines[1:] | default([]) }}"
+          vars:
+            # Normalize whitespace, split into fields
+            fields: "{{ (item | regex_replace('\\s+', ' ') | trim).split(' ') }}"
+            fields_len: "{{ fields | length }}"
+            # Only process lines that look like valid df rows (>= 6 fields)
+            valid_line: "{{ fields_len >= 6 }}"
+            filesystem: "{{ valid_line | ternary(fields[0], omit) }}"
+            blocks_kb_raw: "{{ valid_line | ternary(fields[1], omit) }}"
+            used_kb_raw: "{{ valid_line | ternary(fields[2], omit) }}"
+            available_kb_raw: "{{ valid_line | ternary(fields[3], omit) }}"
+            use_percent_raw: "{{ valid_line | ternary(fields[4], omit) }}"
+            mount_point_raw: >-
+              {{ valid_line | ternary(
+                   (fields[5:]) | join(' '),
+                   omit
+                 ) }}
+            # Coerce numeric fields where possible; keep raw if not numeric
+            blocks_kb: >-
+              {{ (blocks_kb_raw is match('^[0-9]+$')) | ternary(blocks_kb_raw | int, blocks_kb_raw) }}
+            used_kb: >-
+              {{ (used_kb_raw is match('^[0-9]+$')) | ternary(used_kb_raw | int, used_kb_raw) }}
+            available_kb: >-
+              {{ (available_kb_raw is match('^[0-9]+$')) | ternary(available_kb_raw | int, available_kb_raw) }}
+            use_percent: "{{ use_percent_raw }}"
+            mount_point: "{{ mount_point_raw }}"
+
+            item_structured: >-
+              {{
+                {
+                  "filesystem": filesystem,
+                  "blocks_kb": blocks_kb,
+                  "used_kb": used_kb,
+                  "available_kb": available_kb,
+                  "use_percent": use_percent,
+                  "mount_point": mount_point
+                }
+                if valid_line else omit
+              }}
 
         - name: Apply filesystem filter if not 'all'
           set_fact:
             disk_usage_structured: >-
               {{
-                disk_usage_all
+                disk_usage_list
                 if filesystem_filter == 'all'
-                else disk_usage_all | selectattr('mount_point', 'in',
-                     filesystem_filter.split(',') | map('trim') | list) | list
+                else disk_usage_list
+                     | selectattr('mount_point', 'in',
+                         filesystem_filter.split(',') | map('trim') | list)
+                     | list
               }}
 
         - name: Prepare success result structure
@@ -95,6 +103,7 @@
                 filesystem_filter: "{{ filesystem_filter }}"
                 raw_command: "df -P -k"
                 disk_usage: "{{ disk_usage_structured | default([]) }}"
+
       rescue:
         - name: Prepare failure result structure
           set_fact:
@@ -104,8 +113,8 @@
                 Failed to collect disk space information.
                 Error: {{ df_output.stderr | default('Unknown error') }}
               execution_details:
-                target_host: "{{ target_host }}"
-                filesystem_filter: "{{ filesystem_filter }}"
+                target_host: "{{ target_host | default('unknown') }}"
+                filesystem_filter: "{{ filesystem_filter | default('unknown') }}"
                 raw_command: "df -P -k"
                 error_rc: "{{ df_output.rc | default(0) }}"
                 stderr: "{{ df_output.stderr | default('') }}"
