@@ -26,61 +26,63 @@
 
   tasks:
     - block:
-        - name: Collect disk usage using df -P
+        - name: Collect raw df output
           ansible.builtin.command: "df -P -k"
           register: df_output
           changed_when: false
-          failed_when: df_output is failed
+          failed_when: df_output.rc != 0
 
-        - name: Prepare raw df lines (excluding header)
-          set_fact:
-            df_lines: "{{ df_output.stdout_lines[1:] | default([]) }}"
+        - name: Parse df output to JSON via Python helper
+          ansible.builtin.command: >-
+            python3 - << 'EOF'
+            import json
+            import sys
 
-        - name: Normalize df lines into field lists
-          set_fact:
-            df_fields_list: >-
-              {{
-                df_lines
-                | map('regex_replace', '\\s+', ' ')
-                | map('trim')
-                | map('split', ' ')
-                | list
-              }}
+            raw = '''{{ df_output.stdout | replace("'", "'\''") }}'''.splitlines()
+            # Skip header
+            lines = raw[1:]
+            results = []
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split()
+                # Expect at least 6 fields: filesystem, blocks, used, available, use%, mount
+                if len(parts) < 6:
+                    # Skip malformed lines
+                    continue
+                filesystem = parts[0]
+                blocks_kb = parts[1]
+                used_kb = parts[2]
+                available_kb = parts[3]
+                use_percent = parts[4]
+                mount_point = " ".join(parts[5:])
+                results.append({
+                    "filesystem": filesystem,
+                    "blocks_kb": int(blocks_kb) if blocks_kb.isdigit() else blocks_kb,
+                    "used_kb": int(used_kb) if used_kb.isdigit() else used_kb,
+                    "available_kb": int(available_kb) if available_kb.isdigit() else available_kb,
+                    "use_percent": use_percent,
+                    "mount_point": mount_point,
+                })
 
-        - name: Build structured disk usage list
-          vars:
-            mount_filter_list: >-
-              {{
-                (filesystem_filter == 'all')
-                | ternary([], filesystem_filter.split(',') | map('trim') | list)
-              }}
+            print(json.dumps(results))
+            EOF
+          register: df_parsed
+          changed_when: false
+
+        - name: Load parsed JSON into Ansible fact
           set_fact:
-            disk_usage_structured: >-
-              {{
-                df_fields_list
-                | map('community.general.dict', {
-                    'filesystem': 0,
-                    'blocks_kb': 1,
-                    'used_kb': 2,
-                    'available_kb': 3,
-                    'use_percent': 4,
-                    'mount_point': 5
-                  })
-                | selectattr('mount_point', 'defined')
-                | selectattr('mount_point', '!=', '')
-                | list
-              }}
+            disk_usage_all: "{{ df_parsed.stdout | from_json }}"
 
         - name: Apply filesystem filter if not 'all'
-          when: filesystem_filter != 'all'
           set_fact:
             disk_usage_structured: >-
               {{
-                disk_usage_structured
-                | selectattr('mount_point', 'in',
-                    filesystem_filter.split(',') | map('trim') | list
-                  )
-                | list
+                disk_usage_all
+                if filesystem_filter == 'all'
+                else disk_usage_all | selectattr('mount_point', 'in',
+                     filesystem_filter.split(',') | map('trim') | list) | list
               }}
 
         - name: Prepare success result structure
