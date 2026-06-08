@@ -26,18 +26,18 @@
 
     - name: Set status based on /tmp usage
       set_fact:
-        status_code: "{{ 1 if tmp_usage_percent < (threshold | int) else 2 }}"
+        status_code: "{{ 1 if (tmp_usage_percent | int) < (threshold | int) else 2 }}"
         response_message: >-
-          {% if tmp_usage_percent < (threshold | int) -%}
-          /tmp usage is {{ tmp_usage_percent }}%, below threshold {{ threshold | int }}%.
+          {% if (tmp_usage_percent | int) < (threshold | int) -%}
+          /tmp usage is {{ tmp_usage_percent | int }}%, below threshold {{ threshold | int }}%.
           {%- else -%}
-          /tmp usage is {{ tmp_usage_percent }}%, which is greater than or equal to threshold {{ threshold | int }}%.
+          /tmp usage is {{ tmp_usage_percent | int }}%, which is greater than or equal to threshold {{ threshold | int }}%.
           {%- endif %}
 
     - name: Show /tmp usage status
       debug:
         msg:
-          status_code: "{{ status_code }}"
+          status_code: "{{ status_code | int }}"
           response_message: "{{ response_message }}"
-          tmp_usage_percent: "{{ tmp_usage_percent }}"
+          tmp_usage_percent: "{{ tmp_usage_percent | int }}"
           threshold: "{{ threshold | int }}"
