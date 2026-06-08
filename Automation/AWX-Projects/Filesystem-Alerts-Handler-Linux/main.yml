@@ -12,7 +12,6 @@
     allowed_cleanup_dirs:
       - /var/log
       - /tmp
-    
 
     cleanup_pattern:
       - "*.md"
@@ -36,12 +35,19 @@
       set_fact:
         filesystem_usage: "{{ fs_output.stdout | trim | float | round(2) }}"
 
-    - name: Display filesystem usage
-      debug:
-        msg: "Current Filesystem Usage: {{ filesystem_usage }}%"
+    # =====================================================
+    # INITIALIZE VARIABLES
+    # =====================================================
+    - name: Initialize variables
+      set_fact:
+        final_filesystem_usage: "{{ filesystem_usage }}"
+        exceeded_details: ""
+        files_deleted: ""
+        action_details: ""
+        cleanup_performed: false
 
     # =====================================================
-    # CHECK IF THRESHOLD EXCEEDED
+    # GET FILESYSTEMS EXCEEDING THRESHOLD
     # =====================================================
     - name: Get filesystems exceeding threshold
       shell: |
@@ -56,9 +62,9 @@
       when:
         - filesystem_usage > filesystem_threshold
 
-    - name: Display exceeded filesystems
-      debug:
-        var: exceeded_fs.stdout_lines
+    - name: Prepare exceeded filesystem details
+      set_fact:
+        exceeded_details: "{{ exceeded_fs.stdout_lines | join(' | ') if exceeded_fs.stdout_lines is defined else 'None' }}"
       when:
         - filesystem_usage > filesystem_threshold
 
@@ -75,13 +81,11 @@
       when:
         - filesystem_usage > filesystem_threshold
 
-    - name: Display files for cleanup
-      debug:
-        msg: "{{ item.path }}"
-      loop: "{{ files_to_delete.files }}"
+    - name: Prepare files list
+      set_fact:
+        files_deleted: "{{ files_to_delete.files | map(attribute='path') | join(', ') if files_to_delete.files | length > 0 else 'No files found for cleanup' }}"
       when:
         - files_to_delete.files is defined
-        - files_to_delete.files | length > 0
 
     # =====================================================
     # DELETE FILES
@@ -91,8 +95,6 @@
         path: "{{ item.path }}"
         state: absent
       loop: "{{ files_to_delete.files }}"
-      loop_control:
-        label: "{{ item.path }}"
       register: delete_output
       when:
         - filesystem_usage > filesystem_threshold
@@ -102,11 +104,17 @@
       set_fact:
         cleanup_performed: "{{ delete_output.changed | default(false) }}"
 
-    - name: Set cleanup skipped
+    # =====================================================
+    # ACTION DETAILS
+    # =====================================================
+    - name: Prepare action details
       set_fact:
-        cleanup_performed: false
-      when:
-        - cleanup_performed is not defined
+        action_details: >-
+          {% if files_to_delete.files | length > 0 %}
+          Cleaned up files from directories: {{ allowed_cleanup_dirs | join(', ') }}
+          {% else %}
+          No files matched cleanup criteria
+          {% endif %}
 
     # =====================================================
     # WAIT AFTER CLEANUP
@@ -139,18 +147,9 @@
         - cleanup_performed | bool
 
     # =====================================================
-    # FALLBACK (NO REMEDIATION)
+    # STATUS CODE
     # =====================================================
-    - name: Set fallback filesystem usage
-      set_fact:
-        final_filesystem_usage: "{{ filesystem_usage }}"
-      when:
-        - final_filesystem_usage is not defined
-
-    # =====================================================
-    # FINAL STATUS & RESPONSE (ALIGNED TO CPU)
-    # =====================================================
-    - name: Set final response
+    - name: Set final status
       set_fact:
         status_code: >-
           {{
@@ -158,14 +157,34 @@
             else 2
           }}
 
+    # =====================================================
+    # FINAL RESPONSE (POINT-WISE + 
+)
+    # =====================================================
+    - name: Set response message
+      set_fact:
         response_message: >-
           {% if filesystem_usage | float < filesystem_threshold | float %}
-          Filesystem utilization on host {{ hostname }} is {{ filesystem_usage }}%, which is below the configured threshold of {{ filesystem_threshold }}%. No remediation was required. Marking the ticket as resolved.
+          1. Filesystem utilization is within the configured threshold.
+
           {% elif final_filesystem_usage | float < filesystem_threshold | float %}
-          Filesystem usage on host {{ hostname }} exceeded the configured threshold of {{ filesystem_threshold }}%. Cleanup was performed in allowed directories ({{ allowed_cleanup_dirs | join(', ') }}). Post-remediation filesystem utilization is {{ final_filesystem_usage }}%. Filesystem usage is now within acceptable limits. Marking the ticket as resolved.
+          1. Filesystem usage exceeded threshold and was successfully reduced after cleanup.
+
           {% else %}
-          Filesystem usage on host {{ hostname }} exceeded the configured threshold of {{ filesystem_threshold }}%. Cleanup was performed in allowed directories ({{ allowed_cleanup_dirs | join(', ') }}). Post-remediation filesystem utilization is {{ final_filesystem_usage }}%. Filesystem usage remains high after remediation. Escalating the ticket.
+          1. Filesystem usage remains high even after cleanup. Escalation required.
+
           {% endif %}
+          2. Filesystem Usage Before Remediation: {{ filesystem_usage }}%
+
+          3. Filesystem Usage After Remediation: {{ final_filesystem_usage }}%
+
+          4. Affected Filesystems: {{ exceeded_details }}
+
+          5. Cleanup Directories: {{ allowed_cleanup_dirs | join(', ') }}
+
+          6. Files Identified for Cleanup: {{ files_deleted }}
+
+          7. Action Taken: {{ action_details }}
 
     # =====================================================
     # DISPLAY FINAL RESULT
@@ -175,7 +194,6 @@
         msg:
           status_code: "{{ status_code }}"
           response_message: "{{ response_message }}"
-
 
     # =====================================================
     # UPDATE IAUTOMATE STATUS
@@ -194,4 +212,3 @@
         body: "{{lookup('template','status.json.j2')}}"
       delegate_to: localhost
       become: no
-      register: status_update_iautomate          
