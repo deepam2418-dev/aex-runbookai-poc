@@ -1,0 +1,43 @@
+---
+- name: Tmp filesystem usage check on Linux
+  hosts: "{{ target_host }}"
+  gather_facts: false
+
+  vars:
+    threshold: "{{ threshold | default(80) }}"
+
+  tasks:
+    - name: Validate threshold value
+      assert:
+        that:
+          - threshold | int > 0
+          - threshold | int < 100
+        fail_msg: "Threshold must be between 1 and 99"
+        success_msg: "Threshold value is valid"
+
+    - name: Check /tmp filesystem usage
+      command: df -P /tmp
+      register: tmp_df
+      changed_when: false
+
+    - name: Parse /tmp filesystem usage
+      set_fact:
+        tmp_usage_percent: "{{ (tmp_df.stdout_lines[1].split()[4] | regex_replace('%', '')) | int }}"
+
+    - name: Set status based on /tmp usage
+      set_fact:
+        status_code: "{{ 1 if tmp_usage_percent < (threshold | int) else 2 }}"
+        response_message: >-
+          {% if tmp_usage_percent < (threshold | int) -%}
+          /tmp usage is {{ tmp_usage_percent }}%, below threshold {{ threshold }}%.
+          {%- else -%}
+          /tmp usage is {{ tmp_usage_percent }}%, which is greater than or equal to threshold {{ threshold }}%.
+          {%- endif %}
+
+    - name: Show /tmp usage status
+      debug:
+        msg:
+          status_code: "{{ status_code }}"
+          response_message: "{{ response_message }}"
+          tmp_usage_percent: "{{ tmp_usage_percent }}"
+          threshold: "{{ threshold }}"
