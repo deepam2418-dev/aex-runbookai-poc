@@ -32,22 +32,22 @@
           changed_when: false
           failed_when: df_output is failed
 
-        - name: Parse df output into structured data
-          vars:
-            df_lines: "{{ df_output.stdout_lines[1:] | default([]) }}"
+        - name: Prepare raw df lines (excluding header)
           set_fact:
-            disk_usage_list: >-
+            df_lines: "{{ df_output.stdout_lines[1:] | default([]) }}"
+
+        - name: Normalize df lines into field lists
+          set_fact:
+            df_fields_list: >-
               {{
                 df_lines
                 | map('regex_replace', '\\s+', ' ')
+                | map('trim')
                 | map('split', ' ')
-                | map('list')
-                | map('extract', 0, 6)
                 | list
               }}
-          when: df_output.stdout_lines | length > 1
 
-        - name: Build structured disk usage dictionary
+        - name: Build structured disk usage list
           vars:
             mount_filter_list: >-
               {{
@@ -57,24 +57,29 @@
           set_fact:
             disk_usage_structured: >-
               {{
-                disk_usage_list
-                | map('community.general.dict_kv', 'filesystem', 0,
-                                                'blocks_kb', 1,
-                                                'used_kb', 2,
-                                                'available_kb', 3,
-                                                'use_percent', 4,
-                                                'mount_point', 5)
+                df_fields_list
+                | map('community.general.dict', {
+                    'filesystem': 0,
+                    'blocks_kb': 1,
+                    'used_kb': 2,
+                    'available_kb': 3,
+                    'use_percent': 4,
+                    'mount_point': 5
+                  })
+                | selectattr('mount_point', 'defined')
+                | selectattr('mount_point', '!=', '')
                 | list
-                | selectattr('mount_point', 'in', mount_filter_list)
-                  if mount_filter_list | length > 0
-                  else
-                disk_usage_list
-                | map('community.general.dict_kv', 'filesystem', 0,
-                                                'blocks_kb', 1,
-                                                'used_kb', 2,
-                                                'available_kb', 3,
-                                                'use_percent', 4,
-                                                'mount_point', 5)
+              }}
+
+        - name: Apply filesystem filter if not 'all'
+          when: filesystem_filter != 'all'
+          set_fact:
+            disk_usage_structured: >-
+              {{
+                disk_usage_structured
+                | selectattr('mount_point', 'in',
+                    filesystem_filter.split(',') | map('trim') | list
+                  )
                 | list
               }}
 
@@ -100,7 +105,7 @@
                 target_host: "{{ target_host }}"
                 filesystem_filter: "{{ filesystem_filter }}"
                 raw_command: "df -P -k"
-                error_rc: "{{ df_output.rc | default(-1) }}"
+                error_rc: "{{ df_output.rc | default(0) }}"
                 stderr: "{{ df_output.stderr | default('') }}"
 
   post_tasks:
