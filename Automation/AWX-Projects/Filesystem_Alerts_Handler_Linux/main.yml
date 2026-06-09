@@ -1,5 +1,5 @@
 # =========================================================
-# PLAY 1 - FILESYSTEM MONITORING & AUTO REMEDIATION
+# PLAY - FILESYSTEM MONITORING & AUTO REMEDIATION
 # =========================================================
 - name: Filesystem Monitoring and Auto Remediation
   hosts: "{{ hostname }}"
@@ -43,7 +43,6 @@
         final_filesystem_usage: "{{ filesystem_usage }}"
         exceeded_details: ""
         files_deleted: ""
-        action_details: ""
         cleanup_performed: false
 
     # =====================================================
@@ -59,14 +58,12 @@
             print $1, $5, $6
         }'
       register: exceeded_fs
-      when:
-        - filesystem_usage > filesystem_threshold
+      when: filesystem_usage > filesystem_threshold
 
     - name: Prepare exceeded filesystem details
       set_fact:
         exceeded_details: "{{ exceeded_fs.stdout_lines | join(' | ') if exceeded_fs.stdout_lines is defined else 'None' }}"
-      when:
-        - filesystem_usage > filesystem_threshold
+      when: filesystem_usage > filesystem_threshold
 
     # =====================================================
     # FIND FILES FOR CLEANUP
@@ -78,14 +75,16 @@
         file_type: file
         recurse: yes
       register: files_to_delete
-      when:
-        - filesystem_usage > filesystem_threshold
+      when: filesystem_usage > filesystem_threshold
 
     - name: Prepare files list
       set_fact:
-        files_deleted: "{{ files_to_delete.files | map(attribute='path') | join(', ') if files_to_delete.files | length > 0 else 'No files found for cleanup' }}"
-      when:
-        - files_to_delete.files is defined
+        files_deleted: >-
+          {{
+            files_to_delete.files | map(attribute='path') | join(', ')
+            if files_to_delete.files is defined and files_to_delete.files | length > 0
+            else 'No files found for cleanup'
+          }}
 
     # =====================================================
     # DELETE FILES
@@ -105,25 +104,12 @@
         cleanup_performed: "{{ delete_output.changed | default(false) }}"
 
     # =====================================================
-    # ACTION DETAILS
-    # =====================================================
-    - name: Prepare action details
-      set_fact:
-        action_details: >-
-          {% if files_to_delete.files | length > 0 %}
-          Cleaned up files from directories: {{ allowed_cleanup_dirs | join(', ') }}
-          {% else %}
-          No files matched cleanup criteria
-          {% endif %}
-
-    # =====================================================
     # WAIT AFTER CLEANUP
     # =====================================================
     - name: Wait after cleanup
       pause:
         seconds: 10
-      when:
-        - cleanup_performed | bool
+      when: cleanup_performed | bool
 
     # =====================================================
     # RECHECK FILESYSTEM USAGE
@@ -137,60 +123,91 @@
         }' | sort -nr | head -1
       register: fs_after
       changed_when: false
-      when:
-        - cleanup_performed | bool
+      when: cleanup_performed | bool
 
     - name: Set final filesystem usage
       set_fact:
         final_filesystem_usage: "{{ fs_after.stdout | trim | float | round(2) }}"
-      when:
-        - cleanup_performed | bool
+      when: cleanup_performed | bool
 
     # =====================================================
     # STATUS CODE
     # =====================================================
-    - name: Set final status
+    - name: Set status code
       set_fact:
-        status_code: >-
+        status_code: "{{ 1 if final_filesystem_usage < filesystem_threshold else 2 }}"
+
+    # =====================================================
+    # WORKNOTES (CPU-STYLE)
+    # =====================================================
+    - name: Set worknotes
+      set_fact:
+        worknotes: >-
           {{
-            1 if (final_filesystem_usage | float) < (filesystem_threshold | float)
-            else 2
+
+            (
+              'Current filesystem utilization on (' ~ hostname ~ ') is (' ~ filesystem_usage|string ~ '%).\n'
+              ~ 'This is within the defined threshold of (' ~ filesystem_threshold|string ~ '%), so no action is required. Hence closing the ticket.'
+            )
+
+            if filesystem_usage < filesystem_threshold
+
+            else
+
+            (
+              'Filesystem Status: Usage exceeded threshold (' ~ filesystem_threshold|string ~ '%)\n'
+              ~ 'Host: ' ~ hostname ~ '\n'
+              ~ 'Current Filesystem Utilization: ' ~ filesystem_usage|string ~ '%\n'
+              ~ '1. Filesystem Usage Before Remediation: ' ~ filesystem_usage|string ~ '%\n'
+              ~ '2. Filesystem Usage After Remediation: ' ~ final_filesystem_usage|string ~ '%\n'
+
+              ~ '3. Affected Filesystems: '
+              ~ (exceeded_details if exceeded_details != "" else 'NA') ~ '\n'
+
+              ~ '4. Files Identified for Cleanup: '
+              ~ (files_deleted if files_deleted != "" else 'NA') ~ '\n'
+
+              ~ '5. Action Taken: '
+              ~ (
+                  'Cleanup performed successfully'
+                  if cleanup_performed
+                  else 'No files found for cleanup - escalation required'
+                )
+
+              ~ (
+                  '\n6. Note: Filesystem usage is still high after remediation. Escalation required.'
+                  if final_filesystem_usage > filesystem_threshold
+                  else ''
+                )
+            )
           }}
 
     # =====================================================
-    # ✅ FIXED RESPONSE (NO YAML ERROR)
+    # RESPONSE MESSAGE (SHORT)
     # =====================================================
     - name: Set response message
       set_fact:
         response_message: >-
-          {% if filesystem_usage | float < filesystem_threshold | float %}
-          1. Filesystem utilization is within the configured threshold.
-
-          {% elif final_filesystem_usage | float < filesystem_threshold | float %}
-          1. Filesystem usage exceeded threshold and was successfully reduced after cleanup.
-
-          {% else %}
-          1. Filesystem usage remains high even after cleanup. Escalation required.
-
-          {% endif %}
-          2. Filesystem Usage Before Remediation: {{ filesystem_usage }}%
-
-          3. Filesystem Usage After Remediation: {{ final_filesystem_usage }}%
-
-          4. Affected Filesystems: {{ exceeded_details }}
-
-          5. Cleanup Directories: {{ allowed_cleanup_dirs | join(', ') }}
-
-          6. Files Identified for Cleanup: {{ files_deleted }}
-
-          7. Action Taken: {{ action_details }}
+          {{
+            (
+              'Filesystem usage is within threshold. No action required.'
+              if filesystem_usage < filesystem_threshold
+              else
+              (
+                'Cleanup successful.'
+                if final_filesystem_usage < filesystem_threshold
+                else
+                'Filesystem still high, escalation required.'
+              )
+            )
+          }}
 
     # =====================================================
-    # DISPLAY FINAL RESULT
+    # FINAL OUTPUT
     # =====================================================
-    - name: Display final response
+    - name: Display final output
       debug:
         msg:
           status_code: "{{ status_code }}"
           response_message: "{{ response_message }}"
-
+          worknotes: "{{ worknotes }}"
