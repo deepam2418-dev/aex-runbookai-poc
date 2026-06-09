@@ -1,4 +1,5 @@
-⁠# =========================================================
+---
+# =========================================================
 # CPU MONITORING & AUTO REMEDIATION
 # =========================================================
 - name: CPU Monitoring and Auto Remediation
@@ -70,7 +71,7 @@
     # =====================================================
     # FILTER APPROVED PROCESSES
     # =====================================================
-    - name: Filter only approved process names
+    - name: Filter approved processes
       set_fact:
         filtered_processes: >-
           {{
@@ -82,9 +83,6 @@
       when:
         - current_cpu_value | float >= cpu_threshold | float
  
-    # =====================================================
-    # EXTRACT DETAILS
-    # =====================================================
     - name: Extract process PIDs
       set_fact:
         filtered_pids: "{{ filtered_processes | map('first') | list }}"
@@ -107,7 +105,7 @@
         - current_cpu_value | float >= cpu_threshold | float
  
     # =====================================================
-    # CLASSIFY APPROVED / NON-APPROVED
+    # APPROVED / NON APPROVED
     # =====================================================
     - name: Approved processes
       set_fact:
@@ -155,7 +153,7 @@
           {% endif %}
  
     # =====================================================
-    # RESTART SERVICE
+    # RESTART SERVICE ONLY WHEN PROCESS KILLED
     # =====================================================
     - name: Restart dataprocess
       shell: nohup /home/svc_agenticai@ivhinc.com/script/dataprocess1.sh &
@@ -194,19 +192,6 @@
         - process_killed | bool
  
     # =====================================================
-    # NO REMEDIATION CASE
-    # =====================================================
-    - name: Set NA values when remediation not performed
-      set_fact:
-        high_cpu_details: "NA"
-        pid_details: "NA"
-        approved_processes: "NA"
-        non_approved_processes: "NA"
-        action_details: "No action was taken because no remediation done"
-      when:
-        - not process_killed
- 
-    # =====================================================
     # STATUS CODE
     # =====================================================
     - name: Set status
@@ -214,14 +199,12 @@
         status_code: >-
           {{
             1 if current_cpu_value | float < cpu_threshold | float
-            else (
-              1 if final_cpu_value | float < cpu_threshold | float
-              else 2
-            )
+            else 1 if final_cpu_value | float < cpu_threshold | float
+            else 2
           }}
  
     # =====================================================
-    # FINAL RESPONSE
+    # RESPONSE MESSAGE
     # =====================================================
     - name: Set response message
       set_fact:
@@ -287,22 +270,3 @@
         msg:
           status_code: "{{ status_code }}"
           response_message: "{{ response_message }}"
- 
-    # =====================================================
-    # IAUTOMATE UPDATE
-    # =====================================================
-    - name: Update iautomate status
-      uri:
-        url: "http://10.224.11.147:8080/v2/runbooks/orgentityid/1/updaterunbookstatusv2"
-        validate_certs: no
-        user: "iautomate@syneoshealth.com"
-        password: "Yy9%HyZW"
-        method: PUT
-        status_code: 200
-        return_content: yes
-        force_basic_auth: yes
-        body_format: json
-        body: "{{ lookup('template','status.json.j2') }}"
-      delegate_to: localhost
-      become: no
- 
