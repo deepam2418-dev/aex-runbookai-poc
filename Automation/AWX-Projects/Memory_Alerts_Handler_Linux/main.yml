@@ -27,10 +27,6 @@
       set_fact:
         memory_value: "{{ memory_usage.stdout | trim | float }}"
 
-    - name: Display memory usage
-      debug:
-        msg: "Current Memory Usage: {{ memory_value }}%"
-
     # =====================================================
     # GET TOP MEMORY PROCESSES
     # =====================================================
@@ -78,7 +74,6 @@
       when:
         - filtered_pids is defined
         - filtered_pids | length > 0
-      register: kill_results
 
     - name: Set remediation status
       set_fact:
@@ -115,17 +110,14 @@
         final_memory_value: "{{ final_memory_usage.stdout | trim | float }}"
 
     # =====================================================
-    # SET STATUS CODE
+    # STATUS CODE
     # =====================================================
     - name: Set final status code
       set_fact:
-        status_code: >-
-          {{
-            1 if final_memory_value < memory_threshold else 2
-          }}
+        status_code: "{{ 1 if final_memory_value < memory_threshold else 2 }}"
 
     # =====================================================
-    # WORKNOTES (UPDATED ✅ WITH THRESHOLD)
+    # ✅ WORKNOTES (USAGE BASED ✅)
     # =====================================================
     - name: Set worknotes
       set_fact:
@@ -133,15 +125,14 @@
           {{
 
             (
-              'Memory Status: Memory utilization is within acceptable threshold (' ~ memory_threshold|string ~ '%). No remediation required.\n'
-              ~ '1. Memory Usage Before Remediation: ' ~ memory_value|string ~ '%\n'
-              ~ '2. Configured Threshold: ' ~ memory_threshold|string ~ '%\n'
-              ~ '3. Memory Usage After Remediation: NA\n'
-              ~ '4. High Memory Processes: NA\n'
-              ~ '5. Approved Processes: NA\n'
-              ~ '6. Non-Approved Processes: NA\n'
-              ~ '7. Process IDs (PIDs): NA\n'
-              ~ '8. Action Taken: No action required'
+              'Memory Status: Memory utilization is within acceptable limits.\n'
+              ~ '1. Current Memory Usage: ' ~ memory_value|string ~ '%\n'
+              ~ '2. Memory Usage After Remediation: NA\n'
+              ~ '3. High Memory Processes: NA\n'
+              ~ '4. Approved Processes: NA\n'
+              ~ '5. Non-Approved Processes: NA\n'
+              ~ '6. Process IDs (PIDs): NA\n'
+              ~ '7. Action Taken: No action required'
             )
 
             if memory_value < memory_threshold
@@ -151,7 +142,7 @@
             (
 
               (
-                'Memory Status: Memory utilization exceeded threshold (' ~ memory_threshold|string ~ '%).\n'
+                'Memory Status: Memory utilization exceeded threshold.\n'
                 ~ '1. Memory Usage Before Remediation: ' ~ memory_value|string ~ '%\n'
                 ~ '2. Memory Usage After Remediation: ' ~ final_memory_value|string ~ '%\n'
               )
@@ -174,7 +165,7 @@
 
               (
                 '5. Non-Approved Processes: '
-                ~ ('Detected but not whitelisted' if (filtered_names|length == 0) else 'NA') ~ '\n'
+                ~ ('Detected but not whitelisted' if (filtered_names|default([])|length == 0) else 'NA') ~ '\n'
               )
 
               ~
@@ -199,7 +190,7 @@
           }}
 
     # =====================================================
-    # ESCALATION CONDITION
+    # ESCALATION
     # =====================================================
     - name: Set escalation flag
       set_fact:
@@ -216,13 +207,13 @@
         response_message: >-
           {{
             (
-              'Memory usage is within threshold (' ~ memory_threshold|string ~ '%). No remediation required.'
+              'Memory usage is normal at ' ~ memory_value|string ~ '%. No remediation required.'
               if memory_value < memory_threshold
               else
               (
                 'Memory exceeded threshold. '
                 ~ (
-                    'Issue escalated to Rhythm group due to unknown processes.'
+                    'Escalated to Rhythm group due to unknown processes.'
                     if escalation_required | default(false)
                     else
                     'Remediation completed successfully.'
