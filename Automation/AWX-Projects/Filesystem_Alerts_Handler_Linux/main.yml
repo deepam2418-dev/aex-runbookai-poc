@@ -34,6 +34,17 @@
         filesystem_usage: "{{ fs_output.stdout | trim | float }}"
 
     # =====================================================
+    # INITIALIZE VARIABLES
+    # =====================================================
+    - name: Initialize variables
+      set_fact:
+        cleanup_performed: false
+        final_filesystem_usage: "{{ filesystem_usage }}"
+        files_to_delete_list: []
+        file_details: "None"
+        action_details: ""
+
+    # =====================================================
     # DISPLAY FILESYSTEM USAGE
     # =====================================================
     - name: Display filesystem usage
@@ -41,24 +52,7 @@
         msg: "Current Filesystem Usage: {{ filesystem_usage }}%"
 
     # =====================================================
-    # GET FILESYSTEMS EXCEEDING THRESHOLD
-    # =====================================================
-    - name: Get filesystems exceeding threshold
-      shell: |
-        df -hP | awk -v threshold={{ filesystem_threshold }} 'NR>1 {gsub("%","",$5); if($5>threshold) print $1,$5"%"}'
-      register: exceeded_fs
-      changed_when: false
-      when:
-        - filesystem_usage > filesystem_threshold
-
-    - name: Display exceeded filesystems
-      debug:
-        var: exceeded_fs.stdout_lines
-      when:
-        - filesystem_usage > filesystem_threshold
-
-    # =====================================================
-    # FIND FILES FOR CLEANUP
+    # FIND FILES ELIGIBLE FOR CLEANUP
     # =====================================================
     - name: Find files eligible for cleanup
       find:
@@ -67,58 +61,66 @@
         recurse: yes
         file_type: file
       register: files_to_delete
-      when:
-        - filesystem_usage > filesystem_threshold
+      when: filesystem_usage > filesystem_threshold
+
+    # =====================================================
+    # PREPARE FILE DETAILS
+    # =====================================================
+    - name: Prepare file details
+      set_fact:
+        file_details: >-
+          {{
+            (files_to_delete.files | map(attribute='path') | list) | join(' | ')
+            if (files_to_delete.files | length > 0)
+            else 'None'
+          }}
+        files_to_delete_list: "{{ files_to_delete.files | map(attribute='path') | list }}"
+      when: filesystem_usage > filesystem_threshold
 
     # =====================================================
     # DISPLAY FILES FOR CLEANUP
     # =====================================================
     - name: Display files for cleanup
       debug:
-        msg: "{{ item.path }}"
-      loop: "{{ files_to_delete.files }}"
-      when:
-        - files_to_delete.files is defined
-        - files_to_delete.files | length > 0
+        msg: "{{ item }}"
+      loop: "{{ files_to_delete_list }}"
+      when: files_to_delete_list | length > 0
 
     # =====================================================
     # DELETE FILES
     # =====================================================
     - name: Delete eligible files
       file:
-        path: "{{ item.path }}"
+        path: "{{ item }}"
         state: absent
-      loop: "{{ files_to_delete.files }}"
-      loop_control:
-        label: "{{ item.path }}"
+      loop: "{{ files_to_delete_list }}"
       register: delete_output
-      when:
-        - filesystem_usage > filesystem_threshold
-        - files_to_delete.files | length > 0
+      when: files_to_delete_list | length > 0
 
     # =====================================================
     # SET CLEANUP STATUS
     # =====================================================
-    - name: Set cleanup performed
+    - name: Mark cleanup performed
       set_fact:
         cleanup_performed: true
-      when:
-        - delete_output is defined
+      when: delete_output is defined
 
-    - name: Set cleanup skipped
+    - name: Prepare action details
       set_fact:
-        cleanup_performed: false
-      when:
-        - cleanup_performed is not defined
+        action_details: >-
+          {% if files_to_delete_list | length > 0 %}
+          Deleted files: {{ files_to_delete_list | join(', ') }}
+          {% else %}
+          No eligible files found for cleanup
+          {% endif %}
 
     # =====================================================
     # WAIT AFTER CLEANUP
     # =====================================================
     - name: Wait after cleanup
       pause:
-        seconds: 10
-      when:
-        - cleanup_performed | bool
+        seconds: 5
+      when: cleanup_performed | bool
 
     # =====================================================
     # RECHECK FILESYSTEM USAGE
@@ -128,55 +130,46 @@
         df -hP | awk 'NR>1 {gsub("%","",$5); print $5}' | sort -nr | head -1
       register: fs_after
       changed_when: false
-      when:
-        - cleanup_performed | bool
+      when: cleanup_performed | bool
 
     - name: Set final filesystem usage
       set_fact:
         final_filesystem_usage: "{{ fs_after.stdout | trim | float }}"
-      when:
-        - cleanup_performed | bool
-
-    - name: Set fallback filesystem usage
-      set_fact:
-        final_filesystem_usage: "{{ filesystem_usage }}"
-      when:
-        - final_filesystem_usage is not defined
+      when: cleanup_performed | bool
 
     # =====================================================
     # FINAL STATUS & RESPONSE
     # =====================================================
     - name: Set final response
       set_fact:
-
         status_code: >-
-          {%
-            if (final_filesystem_usage | float) < (filesystem_threshold | float)
-          %}
-            1
-          {%- else -%}
-            2
-          {%- endif %}
+          {{
+            1 if (final_filesystem_usage | float) < (filesystem_threshold | float)
+            else 2
+          }}
 
-        response_message: >-
-          {%
-            if (filesystem_usage | float) < (filesystem_threshold | float)
-          %}
-            Current filesystem utilization is ({{ filesystem_usage }}%), which is within the defined threshold ({{ filesystem_threshold }}%). No action required, Hence closing the ticket.
-          {%- else -%}
-            Filesystem usage on host {{ inventory_hostname }} was initially detected at {{ filesystem_usage }}%, exceeding the configured threshold of {{ filesystem_threshold }}%. 
-            {%- if cleanup_performed | bool %}
-              Cleanup was performed in allowed directories ({{ allowed_cleanup_dirs | join(', ') }}). 
-            {%- else %}
-              No eligible files were found for cleanup. 
-            {%- endif %}
-            Post-remediation filesystem utilization is {{ final_filesystem_usage }}%. 
-            {%- if final_filesystem_usage | float < filesystem_threshold | float %}
-              Filesystem usage is now within acceptable limits. Marking the ticket as resolved.
-            {%- else %}
-              Filesystem usage remains high after remediation. Escalating the ticket.
-            {%- endif %}
-          {%- endif %}
+        response_message: |
+          {% if filesystem_usage | float < filesystem_threshold | float %}
+          Current Filesystem utilization is {{ filesystem_usage }}%, which is within threshold {{ filesystem_threshold }}%.
+          No action required. Closing the ticket.
+
+          {% else %}
+
+          {% if final_filesystem_usage | float < filesystem_threshold | float %}
+          1. Filesystem Status: Issue Resolved After Remediation
+          {% else %}
+          1. Filesystem Status: Still High - Escalation Required
+          {% endif %}
+
+          2. Filesystem Usage Before Remediation: {{ filesystem_usage }}%
+
+          3. Filesystem Usage After Remediation: {{ final_filesystem_usage }}%
+
+          4. Files Identified For Cleanup: {{ file_details }}
+
+          5. Action Taken: {{ action_details }}
+
+          {% endif %}
 
     # =====================================================
     # DISPLAY FINAL RESULT
@@ -190,17 +183,18 @@
     # =====================================================
     # UPDATE IAUTOMATE STATUS
     # =====================================================
-    - name: Update iautomate url about status
+    - name: Update iautomate status
       uri:
         url: "http://10.224.11.147:8080/v2/runbooks/orgentityid/1/updaterunbookstatusv2"
-        validate_certs: no
+        method: PUT
         user: "{{ iautomate_user }}"
         password: "{{ iautomate_pass }}"
-        method: PUT
+        force_basic_auth: yes
+        validate_certs: no
         status_code: 200
         return_content: yes
-        force_basic_auth: yes
         body_format: json
-        body: "{{ lookup('template','status.json.j2') }}"
+        body: "{{ lookup('template', 'status.json.j2') }}"
       delegate_to: localhost
+      become: no
       register: status_update_iautomate
