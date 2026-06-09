@@ -7,7 +7,7 @@
   gather_facts: no
 
   vars:
-    memory_threshold: "{{ threshold | default(80) }}"
+    memory_threshold: "{{ threshold | default(80) | float }}"
 
     process_list:
       - testprocess
@@ -18,8 +18,7 @@
     # GET CURRENT MEMORY USAGE
     # =====================================================
     - name: Fetch current memory usage
-      shell: |
-        free | awk '/Mem:/ {printf("%.2f"), $3/$2 * 100}'
+      shell: free | awk '/Mem:/ {printf("%.2f"), $3/$2 * 100}'
       register: memory_usage
       changed_when: false
 
@@ -30,12 +29,11 @@
     # =====================================================
     # GET TOP MEMORY PROCESSES
     # =====================================================
-    - name: Get top memory consuming processes
-      shell: |
-        ps -eo pid,comm,%mem --sort=-%mem | head -n 10
+    - name: Get top memory processes
+      shell: ps -eo pid,comm,%mem --sort=-%mem | head -n 10
       register: top_memory_processes
       changed_when: false
-      when: memory_value > memory_threshold
+      when: memory_value | float > memory_threshold | float
 
     # =====================================================
     # FILTER APPROVED PROCESSES
@@ -49,17 +47,17 @@
             | selectattr('1', 'in', process_list)
             | list
           }}
-      when: memory_value > memory_threshold
+      when: memory_value | float > memory_threshold | float
 
     # =====================================================
     # EXTRACT DETAILS
     # =====================================================
-    - name: Extract process PIDs
+    - name: Extract PIDs
       set_fact:
         filtered_pids: "{{ filtered_processes | map('first') | list }}"
       when: filtered_processes is defined
 
-    - name: Extract process names
+    - name: Extract names
       set_fact:
         filtered_names: "{{ filtered_processes | map(attribute='1') | list }}"
       when: filtered_processes is defined
@@ -67,8 +65,8 @@
     # =====================================================
     # KILL PROCESSES
     # =====================================================
-    - name: Kill filtered high memory processes
-      shell: "kill -9 {{ item }}"
+    - name: Kill processes
+      shell: kill -9 {{ item }}
       loop: "{{ filtered_pids }}"
       ignore_errors: yes
       when:
@@ -77,21 +75,12 @@
 
     - name: Set remediation status
       set_fact:
-        process_killed: true
-      when:
-        - filtered_pids is defined
-        - filtered_pids | length > 0
-
-    - name: Set remediation skipped
-      set_fact:
-        process_killed: false
-      when:
-        - filtered_pids is not defined or filtered_pids | length == 0
+        process_killed: "{{ filtered_pids is defined and filtered_pids | length > 0 }}"
 
     # =====================================================
     # WAIT
     # =====================================================
-    - name: Wait for memory stabilization
+    - name: Wait
       pause:
         seconds: 10
       when: process_killed
@@ -100,8 +89,7 @@
     # FINAL MEMORY CHECK
     # =====================================================
     - name: Fetch final memory usage
-      shell: |
-        free | awk '/Mem:/ {printf("%.2f"), $3/$2 * 100}'
+      shell: free | awk '/Mem:/ {printf("%.2f"), $3/$2 * 100}'
       register: final_memory_usage
       changed_when: false
 
@@ -112,118 +100,58 @@
     # =====================================================
     # STATUS CODE
     # =====================================================
-    - name: Set final status code
+    - name: Set status code
       set_fact:
-        status_code: "{{ 1 if final_memory_value < memory_threshold else 2 }}"
+        status_code: "{{ 1 if process_killed else 2 }}"
 
     # =====================================================
-    # ✅ WORKNOTES (USAGE BASED ✅)
+    # WORKNOTES ✅ FINAL LOGIC
     # =====================================================
     - name: Set worknotes
       set_fact:
         worknotes: >-
           {{
-
             (
-              'Memory Status: Memory utilization is within acceptable limits.\n'
-              ~ '1. Current Memory Usage: ' ~ memory_value|string ~ '%\n'
-              ~ '2. Memory Usage After Remediation: NA\n'
-              ~ '3. High Memory Processes: NA\n'
-              ~ '4. Approved Processes: NA\n'
-              ~ '5. Non-Approved Processes: NA\n'
-              ~ '6. Process IDs (PIDs): NA\n'
-              ~ '7. Action Taken: No action required'
+              'Memory Status: Memory exceeded threshold (' ~ memory_threshold|string ~ '%)\n'
+              ~ 'Host: ' ~ hostname ~ '\n'
+              ~ 'Current Memory Utilization: ' ~ memory_value|string ~ '%\n\n'
+
+              ~ '1. Memory Usage Before Remediation: ' ~ memory_value|string ~ '%\n'
+              ~ '2. Memory Usage After Remediation: ' ~ final_memory_value|string ~ '%\n\n'
+
+              ~ '3. High Memory Processes: ' ~ (filtered_names | join(', ')) ~ '\n'
+              ~ '4. Process IDs: ' ~ (filtered_pids | join(', ')) ~ '\n\n'
+
+              ~ '5. Action Taken: Processes terminated successfully'
             )
 
-            if memory_value < memory_threshold
+            if process_killed
 
             else
 
             (
-
-              (
-                'Memory Status: Memory utilization exceeded threshold.\n'
-                ~ '1. Memory Usage Before Remediation: ' ~ memory_value|string ~ '%\n'
-                ~ '2. Memory Usage After Remediation: ' ~ final_memory_value|string ~ '%\n'
-              )
-
-              ~
-
-              (
-                '3. High Memory Processes: '
-                ~ (filtered_names | join(', ') if filtered_names is defined and filtered_names|length>0 else 'NA') ~ '\n'
-              )
-
-              ~
-
-              (
-                '4. Approved Processes: '
-                ~ (filtered_names | join(', ') if filtered_names is defined and filtered_names|length>0 else 'NA') ~ '\n'
-              )
-
-              ~
-
-              (
-                '5. Non-Approved Processes: '
-                ~ ('Detected but not whitelisted' if (filtered_names|default([])|length == 0) else 'NA') ~ '\n'
-              )
-
-              ~
-
-              (
-                '6. Process IDs (PIDs): '
-                ~ (filtered_pids | join(', ') if filtered_pids is defined and filtered_pids|length>0 else 'NA') ~ '\n'
-              )
-
-              ~
-
-              (
-                '7. Action Taken: '
-                ~ (
-                    'Processes terminated successfully'
-                    if process_killed
-                    else 'No approved process found - escalation required'
-                  )
-              )
-
+              'Current memory utilization on (' ~ hostname ~ ') is (' ~ memory_value|string ~ '%).\n'
+              ~ 'This is within the defined threshold of (' ~ memory_threshold|string ~ '%), so no action is required. Hence closing the ticket.'
             )
           }}
 
     # =====================================================
-    # ESCALATION
-    # =====================================================
-    - name: Set escalation flag
-      set_fact:
-        escalation_required: true
-      when:
-        - memory_value > memory_threshold
-        - filtered_pids | default([]) | length == 0
-
-    # =====================================================
-    # RESPONSE MESSAGE
+    # RESPONSE MESSAGE ✅ FINAL
     # =====================================================
     - name: Set response message
       set_fact:
         response_message: >-
           {{
             (
-              'Memory usage is normal at ' ~ memory_value|string ~ '%. No remediation required.'
-              if memory_value < memory_threshold
+              'Memory issue detected and remediation completed successfully.'
+              if process_killed
               else
-              (
-                'Memory exceeded threshold. '
-                ~ (
-                    'Escalated to Rhythm group due to unknown processes.'
-                    if escalation_required | default(false)
-                    else
-                    'Remediation completed successfully.'
-                  )
-              )
+              'Memory utilization is within threshold. No action required. Ticket will be closed.'
             )
           }}
 
     # =====================================================
-    # DISPLAY FINAL
+    # FINAL OUTPUT
     # =====================================================
     - name: Display final response
       debug:
