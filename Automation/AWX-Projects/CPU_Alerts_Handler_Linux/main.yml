@@ -139,7 +139,7 @@
       when: process_killed
 
     # =====================================================
-    # FIX FOR NO REMEDIATION CASE ✅
+    # FIX FOR NO REMEDIATION CASE 
     # =====================================================
     - name: Force NA when no remediation
       set_fact:
@@ -164,7 +164,7 @@
           }}
 
     # =====================================================
-    # FINAL RESPONSE ✅ CLEAN OUTPUT
+    # FINAL RESPONSE CLEAN OUTPUT
     # =====================================================
     - name: Set response message
       set_fact:
