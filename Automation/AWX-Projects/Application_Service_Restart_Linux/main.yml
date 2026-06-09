@@ -1,0 +1,105 @@
+---
+- name: Application_Service_Restart_Linux
+  hosts: "{{ target_host }}"
+  gather_facts: false
+
+  vars:
+    status_code: 0
+    response_message: "Automation execution is in progress."
+
+  tasks:
+    - name: Run pre execution lifecycle role
+      ansible.builtin.include_role:
+        name: Job_Pre_Execution
+      vars:
+        status_code: "{{ status_code }}"
+        response_message: "{{ response_message }}"
+
+    - name: Main automation block
+      block:
+
+        - name: Validate required parameters
+          ansible.builtin.assert:
+            that:
+              - target_host is defined
+              - (target_host | string | length) > 0
+              - service_name is defined
+              - (service_name | string | length) > 0
+            fail_msg: "Required parameter(s) missing: target_host and/or service_name."
+            success_msg: "Required parameters validated successfully."
+
+        - name: Update job status - parameter validation completed
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: "Parameter validation completed successfully. Automation is in progress."
+
+        - name: Check if service exists on target Linux host
+          ansible.builtin.service_facts:
+
+        - name: Validate that requested service exists
+          ansible.builtin.assert:
+            that:
+              - services[service_name] is defined
+            fail_msg: "The service '{{ service_name }}' was not found on the target host."
+            success_msg: "The service '{{ service_name }}' exists on the target host."
+
+        - name: Update job status - service existence validated
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: "Service '{{ service_name }}' exists on the target host. Proceeding with restart."
+
+        - name: Restart the Linux service
+          ansible.builtin.service:
+            name: "{{ service_name }}"
+            state: restarted
+          register: service_restart_result
+          failed_when: false
+
+        - name: Evaluate restart result and set status facts
+          ansible.builtin.set_fact:
+            status_code: >-
+              {% if service_restart_result is failed or
+                    (service_restart_result.failed | default(false)) %}
+              -1
+              {% else %}
+              1
+              {% endif %}
+            response_message: >-
+              {% if service_restart_result is failed or
+                    (service_restart_result.failed | default(false)) %}
+              "Automation execution was not successful. The service '{{ service_name }}' could not be restarted and the issue is being transferred for manual review."
+              {% else %}
+              "Automation completed successfully. The service '{{ service_name }}' was restarted and is expected to be running."
+              {% endif %}
+
+        - name: Update job status - restart attempt completed
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
+
+      rescue:
+        - name: Set failed and transferred status due to unexpected error
+          ansible.builtin.set_fact:
+            status_code: -1
+            response_message: "Automation execution was not successful due to an unexpected error. The issue is being transferred for manual review."
+
+        - name: Update job status - execution not successful and transferred
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
+
+      always:
+        - name: Run post execution lifecycle role
+          ansible.builtin.include_role:
+            name: Job_Post_Execution
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
