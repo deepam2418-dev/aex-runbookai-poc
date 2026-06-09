@@ -138,9 +138,8 @@
           {{
 
             (
-              'CPU Status: CPU utilization is within acceptable threshold (' ~ cpu_threshold|string ~ '%).\n'
-              ~ 'Current CPU Utilization: ' ~ cpu_value|string ~ '%\n'
-              ~ 'No remediation required.'
+             'Current CPU utilization on' hostname 'is' ~ cpu_value|string ~ '%. This is within the defined threshold of' ~cpu_threshold|string ~ '%, so no action is required, hence closing the ticket'
+            
             )
 
             if cpu_value < cpu_threshold
