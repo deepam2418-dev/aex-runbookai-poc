@@ -118,7 +118,7 @@
         - filtered_pids | default([]) | length == 0
 
     # =====================================================
-    # WORKNOTES
+    # WORKNOTES (UPDATED)
     # =====================================================
     - name: Set worknotes
       set_fact:
@@ -126,11 +126,8 @@
           {{
 
             (
-              'CPU Status: Normal\n'
-              ~ 'Host: ' ~ hostname ~ '\n'
-              ~ 'Current CPU Utilization: ' ~ cpu_value|string ~ '%\n'
-              ~ 'Threshold: ' ~ cpu_threshold|string ~ '%\n'
-              ~ 'No action required. Ticket closed.'
+              'Current CPU utilization on (' ~ hostname ~ ') is (' ~ cpu_value|string ~ '%).\n'
+              ~ 'This is within the defined threshold of (' ~ cpu_threshold|string ~ '%), so no action is required. Hence closing the ticket.'
             )
 
             if cpu_value < cpu_threshold
@@ -166,14 +163,14 @@
           }}
 
     # =====================================================
-    # RESPONSE MESSAGE (SINGLE LINE - IAUTOMATE SAFE)
+    # RESPONSE MESSAGE (UPDATED)
     # =====================================================
     - name: Set response message
       set_fact:
         response_message: >-
           {{
             (
-              'CPU usage is within threshold (' ~ cpu_threshold|string ~ '%). No action required.'
+              'Current CPU utilization is (' ~ cpu_value|string ~ '%) which is within the defined threshold (' ~ cpu_threshold|string ~ '%). No action required, ticket will be closed.'
               if cpu_value < cpu_threshold
               else
               (
