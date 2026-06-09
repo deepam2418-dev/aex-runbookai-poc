@@ -209,45 +209,60 @@
     # FINAL RESPONSE (WORKNOTE FIXED)
     # =====================================================
     - name: Set response message
-      set_fact:
-        response_message: >-
-          {% if current_cpu_value < cpu_threshold %}
-          CPU utilization is {{ current_cpu_value }}%, which is within the defined threshold of {{ cpu_threshold }}%. No remediation is required.
-
-          {% elif final_cpu_value < cpu_threshold %}
-          1. CPU Status: High CPU utilization detected and successfully reduced after remediation.
-
-          2. CPU Usage Before Remediation: {{ current_cpu_value }}%
-
-          3. CPU Usage After Remediation: {{ final_cpu_value }}%
-
-          4. High CPU Processes: {{ high_cpu_details }}
-
-          5. Approved Processes: {{ approved_processes }}
-
-          6. Non-Approved Processes: {{ non_approved_processes }}
-
-          7. Process IDs (PIDs): {{ pid_details }}
-
-          8. Action Taken: {{ action_details }}
-
-          {% else %}
-          1. CPU Status: High CPU utilization persists even after remediation. Escalation required.
-
-          2. CPU Usage Before Remediation: {{ current_cpu_value }}%
-
-          3. CPU Usage After Remediation: {{ final_cpu_value }}%
-
-          4. High CPU Processes: {{ high_cpu_details }}
-
-          5. Approved Processes: {{ approved_processes }}
-
-          6. Non-Approved Processes: {{ non_approved_processes }}
-
-          7. Process IDs (PIDs): {{ pid_details }}
-
-          8. Action Taken: {{ action_details }}
-          {% endif %}
+  set_fact:
+    response_message: >-
+      {% if current_cpu_value < cpu_threshold %}
+      1. CPU Status: Normal (Below Threshold)
+ 
+      2. CPU Before: {{ current_cpu_value }}%
+ 
+      3. CPU After: NA
+ 
+      4. High CPU Processes: NA
+ 
+      5. Approved Processes: NA
+ 
+      6. Non-Approved Processes: NA
+ 
+      7. Process IDs (PIDs): NA
+ 
+      8. Action Taken: No action was taken because no remediation done
+ 
+      {% elif final_cpu_value < cpu_threshold %}
+      1. CPU Status: High CPU utilization detected and successfully reduced after remediation.
+ 
+      2. CPU Usage Before Remediation: {{ current_cpu_value }}%
+ 
+      3. CPU Usage After Remediation: {{ final_cpu_value }}%
+ 
+      4. High CPU Processes Identified: {{ high_cpu_details }}
+ 
+      5. Approved Processes (Eligible for Auto-Remediation): {{ approved_processes }}
+ 
+      6. Non-Approved Processes (No Action Taken): {{ non_approved_processes }}
+ 
+      7. Process IDs (PIDs): {{ pid_details }}
+ 
+      8. Action Taken: {{ action_details }}
+ 
+      {% else %}
+      1. CPU Status: High CPU utilization persists even after remediation. Escalation required.
+ 
+      2. CPU Usage Before Remediation: {{ current_cpu_value }}%
+ 
+      3. CPU Usage After Remediation: {{ final_cpu_value }}%
+ 
+      4. High CPU Processes Identified: {{ high_cpu_details }}
+ 
+      5. Approved Processes (Eligible for Auto-Remediation): {{ approved_processes }}
+ 
+      6. Non-Approved Processes (No Action Taken): {{ non_approved_processes }}
+ 
+      7. Process IDs (PIDs): {{ pid_details }}
+ 
+      8. Action Taken: {{ action_details }}
+ 
+      {% endif %}
 
     # =====================================================
     # DISPLAY
