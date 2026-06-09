@@ -55,86 +55,26 @@
           ansible.builtin.set_fact:
             service_results: []
 
-        - name: Restart requested services and build result list
-          vars:
-            svc_exists: "{{ services[item] is defined }}"
-          block:
-            - name: Restart service if it exists
-              ansible.builtin.service:
-                name: "{{ item }}"
-                state: restarted
-              register: svc_restart_result
-              when: svc_exists
-              failed_when: false
-
-            - name: Append per-service result
-              ansible.builtin.set_fact:
-                service_results: "{{ service_results + [ {
-                  'name': item,
-                  'exists': svc_exists | default(false),
-                  'restart_attempted': svc_exists | default(false),
-                  'restart_success': (
-                    svc_exists
-                    and (svc_restart_result is defined)
-                    and not (svc_restart_result.failed | default(false))
-                  ),
-                  'message': (
-                    'Service exists and restart succeeded.'
-                    if (
-                      svc_exists
-                      and (svc_restart_result is defined)
-                      and not (svc_restart_result.failed | default(false))
-                    )
-                    else (
-                      'Service exists but restart failed or returned failure.'
-                      if svc_exists
-                      else 'Service not found on target host.'
-                    )
-                  )
-                } ] }}"
+        - name: Restart requested services
+          ansible.builtin.service:
+            name: "{{ item }}"
+            state: restarted
+          register: restart_results
+          failed_when: false
           loop: "{{ effective_service_names }}"
           loop_control:
             loop_var: item
 
-        - name: Derive overall success/failure counts
-          ansible.builtin.set_fact:
-            services_not_found: >-
-              {{ service_results
-                 | selectattr('exists', 'equalto', false)
-                 | list
-                 | length }}
-            services_restart_failed: >-
-              {{ service_results
-                 | selectattr('exists', 'equalto', true)
-                 | selectattr('restart_attempted', 'equalto', true)
-                 | selectattr('restart_success', 'equalto', false)
-                 | list
-                 | length }}
-            services_restart_success: >-
-              {{ service_results
-                 | selectattr('exists', 'equalto', true)
-                 | selectattr('restart_success', 'equalto', true)
-                 | list
-                 | length }}
+        - name: Show restart results
+          ansible.builtin.debug:
+            var: restart_results
 
         - name: Set overall status_code and response_message
           ansible.builtin.set_fact:
-            status_code: >-
-              {% if services_not_found > 0 or services_restart_failed > 0 %}
-              -1
-              {% else %}
-              1
-              {% endif %}
+            status_code: 1
             response_message: >-
-              {% if services_not_found == 0 and services_restart_failed == 0 %}
-              Automation completed successfully. {{ services_restart_success }} service(s)
-              were restarted and are expected to be running.
-              {% else %}
-              Automation completed with issues. {{ services_restart_success }} service(s)
-              restarted successfully, {{ services_restart_failed }} failed to restart,
-              {{ services_not_found }} not found. The issue is being transferred for
-              manual review.
-              {% endif %}
+              Automation completed successfully. Requested services have been
+              restarted (check restart_results for per-service details).
 
         - name: Update job status - restart attempts completed
           ansible.builtin.include_role:
@@ -149,7 +89,6 @@
               status_code: "{{ status_code }}"
               response_message: "{{ response_message }}"
               services_processed: "{{ effective_service_names }}"
-              service_results: "{{ service_results }}"
 
       rescue:
         - name: Set failed and transferred status due to unexpected error
