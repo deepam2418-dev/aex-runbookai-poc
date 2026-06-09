@@ -210,9 +210,9 @@
     # =====================================================
     - name: Set response message
       set_fact:
-        response_message: >-
+        response_message: |
           {% if current_cpu_value | float < cpu_threshold | float %}
-          CPU usage is within threshold ({{ cpu_threshold }}%). No remediation required. Hence closing the ticket.
+          Current CPU utilization is ({{ current_cpu_value }}%). Which is within the defined threshold ({{ cpu_threshold }}%). No action required, Hence closing the ticket.
           {% else %}
           {% if final_cpu_value | float < cpu_threshold | float %}
           1. CPU Status: Issue Resolved After Remediation
