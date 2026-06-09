@@ -125,7 +125,7 @@
           }}
 
     # =====================================================
-    # WORKNOTES (NEW ✅)
+    # WORKNOTES (UPDATED ✅ WITH THRESHOLD)
     # =====================================================
     - name: Set worknotes
       set_fact:
@@ -133,14 +133,15 @@
           {{
 
             (
-              'Memory Status: Memory utilization is within acceptable threshold. No remediation required.\n'
+              'Memory Status: Memory utilization is within acceptable threshold (' ~ memory_threshold|string ~ '%). No remediation required.\n'
               ~ '1. Memory Usage Before Remediation: ' ~ memory_value|string ~ '%\n'
-              ~ '2. Memory Usage After Remediation: NA\n'
-              ~ '3. High Memory Processes: NA\n'
-              ~ '4. Approved Processes: NA\n'
-              ~ '5. Non-Approved Processes: NA\n'
-              ~ '6. Process IDs (PIDs): NA\n'
-              ~ '7. Action Taken: No action required'
+              ~ '2. Configured Threshold: ' ~ memory_threshold|string ~ '%\n'
+              ~ '3. Memory Usage After Remediation: NA\n'
+              ~ '4. High Memory Processes: NA\n'
+              ~ '5. Approved Processes: NA\n'
+              ~ '6. Non-Approved Processes: NA\n'
+              ~ '7. Process IDs (PIDs): NA\n'
+              ~ '8. Action Taken: No action required'
             )
 
             if memory_value < memory_threshold
@@ -150,7 +151,7 @@
             (
 
               (
-                'Memory Status: Memory utilization exceeded threshold.\n'
+                'Memory Status: Memory utilization exceeded threshold (' ~ memory_threshold|string ~ '%).\n'
                 ~ '1. Memory Usage Before Remediation: ' ~ memory_value|string ~ '%\n'
                 ~ '2. Memory Usage After Remediation: ' ~ final_memory_value|string ~ '%\n'
               )
@@ -190,7 +191,7 @@
                 ~ (
                     'Processes terminated successfully'
                     if process_killed
-                    else 'No approved process found'
+                    else 'No approved process found - escalation required'
                   )
               )
 
@@ -198,7 +199,7 @@
           }}
 
     # =====================================================
-    # ESCALATION CONDITION (NEW ✅)
+    # ESCALATION CONDITION
     # =====================================================
     - name: Set escalation flag
       set_fact:
@@ -208,14 +209,14 @@
         - filtered_pids | default([]) | length == 0
 
     # =====================================================
-    # RESPONSE MESSAGE (unchanged logic + escalation text)
+    # RESPONSE MESSAGE
     # =====================================================
     - name: Set response message
       set_fact:
         response_message: >-
           {{
             (
-              'Memory usage is within threshold. No remediation required.'
+              'Memory usage is within threshold (' ~ memory_threshold|string ~ '%). No remediation required.'
               if memory_value < memory_threshold
               else
               (
@@ -224,7 +225,7 @@
                     'Issue escalated to Rhythm group due to unknown processes.'
                     if escalation_required | default(false)
                     else
-                    'Remediation attempted.'
+                    'Remediation completed successfully.'
                   )
               )
             )
