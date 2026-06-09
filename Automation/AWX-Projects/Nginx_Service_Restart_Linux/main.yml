@@ -1,0 +1,109 @@
+---
+- name: Nginx_Service_Restart_Linux
+  hosts: "{{ target_host }}"
+  gather_facts: false
+  become: true
+
+  vars:
+    status_code: 0
+    response_message: "Automation execution is in progress."
+    nginx_service_name: "nginx"
+
+  tasks:
+    - name: Run pre execution lifecycle role
+      ansible.builtin.include_role:
+        name: Job_Pre_Execution
+      vars:
+        status_code: "{{ status_code }}"
+        response_message: "{{ response_message }}"
+
+    - name: Main automation block
+      block:
+        - name: Validate required parameters
+          ansible.builtin.assert:
+            that:
+              - target_host is defined
+              - (target_host | string | length) > 0
+            fail_msg: "Required parameter target_host is missing or empty."
+            success_msg: "Required parameters validated successfully."
+
+        - name: Update job status - parameter validation completed
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: "Parameter validation completed successfully. Automation is in progress."
+
+        - name: Check if nginx service is installed
+          ansible.builtin.service_facts:
+
+        - name: Validate nginx service presence
+          ansible.builtin.assert:
+            that:
+              - nginx_service_name in ansible_facts.services
+            fail_msg: "nginx service is not installed or not detectable on the target host."
+            success_msg: "nginx service is present on the target host."
+
+        - name: Update job status - nginx presence validated
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: "nginx service presence validated. Proceeding to restart."
+
+        - name: Restart nginx service
+          ansible.builtin.service:
+            name: "{{ nginx_service_name }}"
+            state: restarted
+            enabled: true
+
+        - name: Update job status - nginx restart attempted
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: "nginx restart attempted. Verifying service status."
+
+        - name: Verify nginx service is running
+          ansible.builtin.service_facts:
+
+        - name: Assert nginx service is running
+          ansible.builtin.assert:
+            that:
+              - ansible_facts.services[nginx_service_name].state is defined
+              - ansible_facts.services[nginx_service_name].state == "running"
+            fail_msg: "nginx service is not running after restart attempt."
+            success_msg: "nginx service is running after restart."
+
+        - name: Set successful resolution status
+          ansible.builtin.set_fact:
+            status_code: 1
+            response_message: "Automation completed successfully. nginx service was restarted and is running."
+
+        - name: Update job status - successfully resolved
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
+
+      rescue:
+        - name: Set failed and transferred status
+          ansible.builtin.set_fact:
+            status_code: -1
+            response_message: "Automation execution was not successful. nginx restart failed or prerequisites were not met. The issue is being transferred for manual review."
+
+        - name: Update job status - execution not successful and transferred
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
+
+      always:
+        - name: Run post execution lifecycle role
+          ansible.builtin.include_role:
+            name: Job_Post_Execution
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
