@@ -36,17 +36,16 @@
     # =====================================================
     - name: Initialize variables
       set_fact:
-        filtered_processes: []
-        filtered_pids: []
-        filtered_names: []
-        process_killed: false
-        final_cpu_value: "{{ current_cpu_value }}"
-        high_cpu_details: "NA"
-        pid_details: "NA"
-        action_details: ""
-        approved_processes: "NA"
-        non_approved_processes: "NA"
-
+    filtered_processes: []
+    filtered_pids: []
+    filtered_names: []
+    process_killed: false
+    final_cpu_value: "{{ current_cpu_value }}"
+    high_cpu_details: "NA"
+    pid_details: "NA"
+    action_details: "No action was taken because no remediation done"
+    approved_processes: "NA"
+    non_approved_processes: "NA"
     # =====================================================
     # GET HIGH CPU PROCESSES
     # =====================================================
