@@ -57,43 +57,39 @@
           ansible.builtin.set_fact:
             service_results: []
 
-        - name: Process each requested service
-          ansible.builtin.block:
-            - name: Validate that requested service exists
-              ansible.builtin.assert:
-                that:
-                  - services[item] is defined
-                fail_msg: "The service '{{ item }}' was not found on the target host."
-                success_msg: "The service '{{ item }}' exists on the target host."
-              register: service_exist_check
-              failed_when: false
+        - name: Validate and restart requested services
+          vars:
+            svc_name: "{{ item }}"
+            svc_exists: "{{ (services[svc_name] is defined) | bool }}"
+          block:
 
-            - name: Restart the Linux service when it exists
+            - name: Restart service if it exists
               ansible.builtin.service:
-                name: "{{ item }}"
+                name: "{{ svc_name }}"
                 state: restarted
-              register: service_restart_result
-              when: service_exist_check is succeeded
+              register: svc_restart_result
+              when: svc_exists
               failed_when: false
 
             - name: Build per-service result record
               ansible.builtin.set_fact:
                 service_results: "{{ service_results + [ {
-                  'name': item,
-                  'exists': (services[item] is defined),
-                  'restart_attempted': (service_exist_check is succeeded),
+                  'name': svc_name,
+                  'exists': svc_exists,
+                  'restart_attempted': svc_exists,
                   'restart_success': (
-                    service_restart_result is defined
-                    and not (service_restart_result.failed | default(false))
-                  ) if (service_exist_check is succeeded) else false,
+                    svc_exists
+                    and svc_restart_result is defined
+                    and not (svc_restart_result.failed | default(false))
+                  ),
                   'message': (
                     'Service exists and restart succeeded.'
-                    if (service_exist_check is succeeded
-                        and service_restart_result is defined
-                        and not (service_restart_result.failed | default(false)))
+                    if (svc_exists
+                        and svc_restart_result is defined
+                        and not (svc_restart_result.failed | default(false)))
                     else (
                       'Service exists but restart failed or returned failure.'
-                      if (service_exist_check is succeeded)
+                      if svc_exists
                       else 'Service not found on target host.'
                     )
                 } ] }}"
