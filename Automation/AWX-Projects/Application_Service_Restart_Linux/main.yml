@@ -81,12 +81,13 @@
               )
             } ] }}"
           vars:
-            restart_result: "{{ (services[item] is defined)
-               | ternary(
-                   lookup('ansible.builtin.pipe', 'systemctl restart ' ~ item, errors='ignore') | default(''),
-                   omit
-                 )
-            }}"
+            restart_result: >-
+              {{ (services[item] is defined)
+                 | ternary(
+                     (lookup('ansible.builtin.pipe', 'systemctl restart ' ~ item, errors='ignore') | default('')),
+                     omit
+                   )
+              }}
           loop: "{{ effective_service_names }}"
 
         - name: Derive overall success/failure counts
