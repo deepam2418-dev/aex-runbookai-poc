@@ -205,19 +205,21 @@
     # =====================================================
     # FINAL RESPONSE (POINT-WISE WITH NEW LINE)
     # =====================================================
+       # =====================================================
+    # FINAL RESPONSE / WORKNOTES
+    # =====================================================
     - name: Set response message
       set_fact:
         response_message: >-
           {% if current_cpu_value | float < cpu_threshold | float %}
-          1. CPU Status: Normal (Below Threshold)
-
-          {% elif final_cpu_value | float < cpu_threshold | float %}
+          CPU usage is within threshold ({{ cpu_threshold }}%). No remediation required. Hence closing the ticket.
+          {% else %}
+          {% if final_cpu_value | float < cpu_threshold | float %}
           1. CPU Status: Issue Resolved After Remediation
-
           {% else %}
           1. CPU Status: Still High - Escalation Required
-
           {% endif %}
+
           2. CPU Before: {{ current_cpu_value }}%
 
           3. CPU After: {{ final_cpu_value }}%
@@ -231,6 +233,7 @@
           7. Process IDs (PIDs): {{ pid_details }}
 
           8. Action Taken: {{ action_details }}
+          {% endif %}
 
     # =====================================================
     # DISPLAY
