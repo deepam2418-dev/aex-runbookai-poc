@@ -212,27 +212,27 @@
       set_fact:
         response_message: |
           {% if current_cpu_value | float < cpu_threshold | float %}
-          Current CPU utilization is ({{ current_cpu_value }}%). Which is within the defined threshold ({{ cpu_threshold }}%). No action required, Hence closing the ticket.
+          Current CPU utilization is {{ current_cpu_value }}%. Which is within the defined threshold {{ cpu_threshold }}%. No action required, Hence closing the ticket.
           {% else %}
           {% if final_cpu_value | float < cpu_threshold | float %}
-          1. CPU Status: Issue Resolved After Remediation
+           CPU Status: Issue Resolved After Remediation
           {% else %}
-          1. CPU Status: Still High - Escalation Required
+           CPU Status: Still High - Escalation Required
           {% endif %}
 
-          2. CPU Before: {{ current_cpu_value }}%
+           CPU Utilization Before Remediation: {{ current_cpu_value }}%
 
-          3. CPU After: {{ final_cpu_value }}%
+           CPU Utilization After Remediation: {{ final_cpu_value }}%
 
-          4. High CPU Processes: {{ high_cpu_details }}
+           High CPU Processes: {{ high_cpu_details }}
 
-          5. Approved Processes: {{ approved_processes }}
+           Approved Processes: {{ approved_processes }}
 
-          6. Non-Approved Processes: {{ non_approved_processes }}
+           Non-Approved Processes: {{ non_approved_processes }}
 
-          7. Process IDs (PIDs): {{ pid_details }}
+           Process IDs (PIDs): {{ pid_details }}
 
-          8. Action Taken: {{ action_details }}
+           Action Taken: {{ action_details }}
           {% endif %}
 
     # =====================================================
