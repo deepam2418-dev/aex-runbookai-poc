@@ -1,10 +1,10 @@
 # =========================================================
-# PLAY - CPU MONITORING & AUTO REMEDIATION (LINUX)
+# CPU MONITORING & AUTO REMEDIATION
 # =========================================================
-- name: Linux CPU Monitoring and Auto Remediation
+- name: CPU Monitoring and Auto Remediation
   hosts: "{{ hostname }}"
-  become: yes
   gather_facts: no
+  become: yes
 
   vars:
     cpu_threshold: "{{ threshold | default(80) }}"
@@ -20,201 +20,224 @@
   tasks:
 
     # =====================================================
-    # GET CURRENT CPU USAGE
+    # CHECK CURRENT CPU USAGE
     # =====================================================
-    - name: Fetch current CPU usage
-      shell: top -bn1 | grep "Cpu(s)" | awk '{print 100 - $8}'
-      register: cpu_usage
+    - name: Get current CPU usage
+      shell: "top -bn1 | grep 'Cpu(s)' | awk '{print 100 - $8}'"
+      register: current_cpu
       changed_when: false
 
-    - name: Set CPU value
+    - name: Set current CPU value
       set_fact:
-        cpu_value: "{{ cpu_usage.stdout | trim | float }}"
+        current_cpu_value: "{{ current_cpu.stdout | trim | float | round(2) }}"
 
     # =====================================================
-    # GET TOP CPU PROCESSES
+    # INITIALIZE VARIABLES
     # =====================================================
-    - name: Get top CPU consuming processes
-      shell: ps -eo pid,comm,%cpu --sort=-%cpu | head -n 10
-      register: top_cpu_processes
+    - name: Initialize variables
+      set_fact:
+        filtered_processes: []
+        filtered_pids: []
+        filtered_names: []
+        process_killed: false
+        final_cpu_value: "{{ current_cpu_value }}"
+        high_cpu_details: ""
+        pid_details: ""
+        action_details: ""
+        approved_processes: ""
+        non_approved_processes: ""
+
+    # =====================================================
+    # GET HIGH CPU PROCESSES
+    # =====================================================
+    - name: Get matching high CPU processes
+      shell: |
+        ps -eo pid,comm,%cpu --no-headers | awk '$3 > {{ cpu_threshold }} {print $1, $2, $3}'
+      register: high_cpu
       changed_when: false
-      when: cpu_value > cpu_threshold
+      when:
+        - current_cpu_value | float >= cpu_threshold | float
+
+    # =====================================================
+    # STORE HIGH CPU DETAILS
+    # =====================================================
+    - name: Prepare high CPU details
+      set_fact:
+        high_cpu_details: "{{ high_cpu.stdout_lines | join(' | ') if high_cpu.stdout_lines is defined else 'None' }}"
+      when:
+        - current_cpu_value | float >= cpu_threshold | float
 
     # =====================================================
     # FILTER APPROVED PROCESSES
     # =====================================================
-    - name: Filter approved processes
+    - name: Filter only approved process names
       set_fact:
         filtered_processes: >-
           {{
-            top_cpu_processes.stdout_lines[1:]
+            high_cpu.stdout_lines
             | map('split')
             | selectattr('1', 'in', process_list)
             | list
           }}
-      when: cpu_value > cpu_threshold
+      when:
+        - current_cpu_value | float >= cpu_threshold | float
 
-    - name: Extract PIDs
+    # =====================================================
+    # EXTRACT DETAILS
+    # =====================================================
+    - name: Extract process PIDs
       set_fact:
         filtered_pids: "{{ filtered_processes | map('first') | list }}"
-      when: filtered_processes is defined
+      when:
+        - current_cpu_value | float >= cpu_threshold | float
 
     - name: Extract process names
       set_fact:
         filtered_names: "{{ filtered_processes | map(attribute='1') | list }}"
-      when: filtered_processes is defined
+      when:
+        - current_cpu_value | float >= cpu_threshold | float
+
+    # =====================================================
+    # PID DETAILS
+    # =====================================================
+    - name: Prepare PID details
+      set_fact:
+        pid_details: "{{ filtered_pids | join(', ') if filtered_pids | length > 0 else 'None' }}"
+      when:
+        - current_cpu_value | float >= cpu_threshold | float
+
+    # =====================================================
+    # CLASSIFY APPROVED / NON-APPROVED
+    # =====================================================
+    - name: Approved processes
+      set_fact:
+        approved_processes: "{{ filtered_names | unique | join(', ') if filtered_names | length > 0 else 'None' }}"
+      when:
+        - current_cpu_value | float >= cpu_threshold | float
+
+    - name: Non-approved processes
+      set_fact:
+        non_approved_processes: >-
+          {{
+            high_cpu.stdout_lines
+            | map('split')
+            | map(attribute=1)
+            | difference(process_list)
+            | unique
+            | join(', ')
+            if high_cpu.stdout_lines is defined else 'None'
+          }}
+      when:
+        - current_cpu_value | float >= cpu_threshold | float
 
     # =====================================================
     # KILL PROCESSES
     # =====================================================
-    - name: Kill filtered processes
-      shell: kill -9 {{ item }}
+    - name: Kill filtered high CPU processes
+      shell: "kill -9 {{ item }}"
       loop: "{{ filtered_pids }}"
+      register: kill_results
       ignore_errors: yes
       when:
-        - filtered_pids is defined
+        - current_cpu_value | float >= cpu_threshold | float
         - filtered_pids | length > 0
-      register: kill_results
+
+    # =====================================================
+    # ACTION DETAILS
+    # =====================================================
+    - name: Prepare action details
+      set_fact:
+        action_details: >-
+          {% if filtered_pids | length > 0 %}
+          Killed processes: {{ filtered_pids | join(', ') }}
+          {% else %}
+          No approved processes found for termination
+          {% endif %}
+
+    # =====================================================
+    # RESTART SERVICE
+    # =====================================================
+    - name: Restart dataprocess
+      shell: nohup /home/svc_agenticai@ivhinc.com/script/dataprocess1.sh &
 
     - name: Set remediation status
       set_fact:
-        process_killed: "{{ filtered_pids is defined and filtered_pids | length > 0 }}"
+        process_killed: true
+      when:
+        - filtered_pids | length > 0
 
     # =====================================================
     # WAIT
     # =====================================================
-    - name: Wait 10 seconds
+    - name: Wait for startup
       pause:
         seconds: 10
-      when: process_killed
+      when:
+        - process_killed | bool
 
     # =====================================================
-    # FINAL CPU CHECK
+    # RECHECK CPU
     # =====================================================
-    - name: Get final CPU usage
-      shell: top -bn1 | grep "Cpu(s)" | awk '{print 100 - $8}'
-      register: final_cpu_usage
+    - name: Get CPU after remediation
+      shell: "top -bn1 | grep 'Cpu(s)' | awk '{print 100 - $8}'"
+      register: cpu_usage
       changed_when: false
+      when:
+        - process_killed | bool
 
     - name: Set final CPU value
       set_fact:
-        final_cpu_value: "{{ final_cpu_usage.stdout | trim | float }}"
+        final_cpu_value: "{{ cpu_usage.stdout | trim | float | round(2) }}"
+      when:
+        - process_killed | bool
 
     # =====================================================
     # STATUS CODE
     # =====================================================
-    - name: Set status code
+    - name: Set status
       set_fact:
-        status_code: "{{ 1 if final_cpu_value < cpu_threshold else 2 }}"
-
-    # =====================================================
-    # ESCALATION CHECK
-    # =====================================================
-    - name: Set escalation flag
-      set_fact:
-        escalation_required: true
-      when:
-        - cpu_value > cpu_threshold
-        - filtered_pids | default([]) | length == 0
-
-    # =====================================================
-    # WORKNOTES (UPDATED)
-    # =====================================================
-    - name: Set worknotes
-      set_fact:
-        worknotes: >-
+        status_code: >-
           {{
-
-            (
-              'Current CPU utilization on (' ~ hostname ~ ') is (' ~ cpu_value|string ~ '%).\n'
-              ~ 'This is within the defined threshold of ' ~ cpu_threshold|string ~ '%, so no action is required. Hence closing the ticket.'
-            )
-
-            if cpu_value < cpu_threshold
-
-            else
-
-            (
-              'CPU Status: CPU exceeded threshold (' ~ cpu_threshold|string ~ '%)\n'
-              ~ 'Host: ' ~ hostname ~ '\n'
-              ~ 'Current CPU Utilization: ' ~ cpu_value|string ~ '%\n'
-              ~ '1. CPU Usage Before Remediation: ' ~ cpu_value|string ~ '%\n'
-              ~ '2. CPU Usage After Remediation: ' ~ final_cpu_value|string ~ '%\n'
-
-              ~ '3. High CPU Processes: '
-              ~ (filtered_names | join(', ') if filtered_names is defined and filtered_names|length > 0 else 'NA') ~ '\n'
-
-              ~ '4. Process IDs: '
-              ~ (filtered_pids | join(', ') if filtered_pids is defined and filtered_pids|length > 0 else 'NA') ~ '\n'
-
-              ~ '5. Action Taken: '
-              ~ (
-                  'Processes terminated successfully'
-                  if process_killed
-                  else 'No approved process found - escalation required'
-                )
-
-              ~ (
-                  '\n6. Note: CPU utilization is still high after remediation. Escalation required.'
-                  if final_cpu_value > cpu_threshold
-                  else ''
-                )
-            )
+            1 if (final_cpu_value | float) < (cpu_threshold | float)
+            else 2
           }}
 
     # =====================================================
-    # RESPONSE MESSAGE (UPDATED)
+    # FINAL RESPONSE (UPDATED WORDING)
     # =====================================================
     - name: Set response message
       set_fact:
         response_message: >-
-          {{
-            (
-              'Current CPU utilization is ' ~ cpu_value|string ~ '% which is within the defined threshold ' ~ cpu_threshold|string ~ '%. No action required, ticket will be closed.'
-              if cpu_value < cpu_threshold
-              else
-              (
-                'CPU exceeded threshold. '
-                ~ (
-                    'Issue escalated due to unknown processes.'
-                    if escalation_required | default(false)
-                    else
-                    (
-                      'Remediation successful.'
-                      if final_cpu_value < cpu_threshold
-                      else
-                      'CPU still high after remediation. Escalation required.'
-                    )
-                  )
-              )
-            )
-          }}
+          {% if current_cpu_value | float < cpu_threshold | float %}
+          1. CPU Utilization is within acceptable threshold. No remediation required.
+
+          {% elif final_cpu_value | float < cpu_threshold | float %}
+          1. High CPU utilization detected and successfully reduced after remediation.
+
+          {% else %}
+          1. High CPU utilization persists even after remediation. Escalation required.
+
+          {% endif %}
+          2. CPU Usage Before Remediation: {{ current_cpu_value }}%
+
+          3. CPU Usage After Remediation: {{ final_cpu_value }}%
+
+          4. High CPU Processes Identified: {{ high_cpu_details }}
+
+          5. Approved Processes (Eligible for Auto-Remediation): {{ approved_processes }}
+
+          6. Non-Approved Processes (No Action Taken): {{ non_approved_processes }}
+
+          7. Process IDs (PIDs): {{ pid_details }}
+
+          8. Action Taken: {{ action_details }}
 
     # =====================================================
-    # FINAL OUTPUT
+    # DISPLAY
     # =====================================================
-    - name: Display final output
+    - name: Output
       debug:
         msg:
           status_code: "{{ status_code }}"
           response_message: "{{ response_message }}"
-          worknotes: "{{ worknotes }}"
-
-    # =====================================================
-    # IAUTOMATE UPDATE
-    # =====================================================
-    - name: Update iautomate status
-      uri:
-        url: "http://10.224.11.147:8080/v2/runbooks/orgentityid/1/updaterunbookstatusv2"
-        validate_certs: no
-        user: "iautomate@syneoshealth.com"
-        password: "Yy9%HyZW"
-        method: PUT
-        status_code: 200
-        return_content: yes
-        force_basic_auth: yes
-        body_format: json
-        body: "{{ lookup('template','status.json.j2') }}"
-      delegate_to: localhost
-      become: no
-      register: status_update_iautomate
+ 
