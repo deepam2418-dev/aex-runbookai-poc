@@ -32,12 +32,7 @@
 
         - name: Determine effective service list
           ansible.builtin.set_fact:
-            effective_service_names: >-
-              {% if service_names is defined and service_names | length > 0 %}
-              {{ service_names | to_json | from_json }}
-              {% else %}
-              [ "{{ service_name }}" ]
-              {% endif %}
+            effective_service_names: "{{ service_names | default([service_name]) }}"
 
         - name: Update job status - parameter validation and service list determined
           ansible.builtin.include_role:
