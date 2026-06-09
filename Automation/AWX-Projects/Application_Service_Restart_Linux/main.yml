@@ -4,7 +4,6 @@
   gather_facts: false
 
   vars:
-    # Job lifecycle status variables
     status_code: 0
     response_message: "Automation execution is in progress."
 
@@ -18,7 +17,6 @@
 
     - name: Main automation block
       block:
-
         - name: Validate required parameters
           ansible.builtin.assert:
             that:
@@ -36,7 +34,7 @@
           ansible.builtin.set_fact:
             effective_service_names: >-
               {% if service_names is defined and service_names | length > 0 %}
-              {{ service_names }}
+              {{ service_names | to_json | from_json }}
               {% else %}
               [ "{{ service_name }}" ]
               {% endif %}
@@ -58,36 +56,38 @@
             service_results: []
 
         - name: Restart requested services and build result list
-          ansible.builtin.set_fact:
-            service_results: "{{ service_results + [ {
-              'name': item,
-              'exists': (services[item] is defined) | default(false),
-              'restart_attempted': (services[item] is defined) | default(false),
-              'restart_success': (
-                services[item] is defined
-                and (restart_result is defined)
-                and not (restart_result.failed | default(false))
-              ),
-              'message': (
-                'Service exists and restart succeeded.'
-                if (services[item] is defined
-                    and (restart_result is defined)
-                    and not (restart_result.failed | default(false)))
-                else (
-                  'Service exists but restart failed or returned failure.'
-                  if (services[item] is defined)
-                  else 'Service not found on target host.'
-                )
-              )
-            } ] }}"
-          vars:
-            restart_result: >-
-              {{ (services[item] is defined)
-                 | ternary(
-                     (lookup('ansible.builtin.pipe', 'systemctl restart ' ~ item, errors='ignore') | default('')),
-                     omit
-                   )
-              }}
+          block:
+            - name: Restart service if it exists
+              ansible.builtin.service:
+                name: "{{ item }}"
+                state: restarted
+              register: svc_restart_result
+              when: services[item] is defined
+              failed_when: false
+
+            - name: Append per-service result
+              ansible.builtin.set_fact:
+                service_results: "{{ service_results + [ {
+                  'name': item,
+                  'exists': (services[item] is defined) | default(false),
+                  'restart_attempted': (services[item] is defined) | default(false),
+                  'restart_success': (
+                    services[item] is defined
+                    and (svc_restart_result is defined)
+                    and not (svc_restart_result.failed | default(false))
+                  ),
+                  'message': (
+                    'Service exists and restart succeeded.'
+                    if (services[item] is defined
+                        and (svc_restart_result is defined)
+                        and not (svc_restart_result.failed | default(false)))
+                    else (
+                      'Service exists but restart failed or returned failure.'
+                      if (services[item] is defined)
+                      else 'Service not found on target host.'
+                    )
+                  )
+                } ] }}"
           loop: "{{ effective_service_names }}"
 
         - name: Derive overall success/failure counts
