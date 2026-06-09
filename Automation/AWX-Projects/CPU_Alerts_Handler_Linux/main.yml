@@ -7,7 +7,7 @@
   gather_facts: no
 
   vars:
-    cpu_threshold: "{{ threshold | default(80) }}"
+    cpu_threshold: "{{ threshold | default(80) | float }}"
 
     process_list:
       - dataprocess1
@@ -38,7 +38,7 @@
       shell: ps -eo pid,comm,%cpu --sort=-%cpu | head -n 10
       register: top_cpu_processes
       changed_when: false
-      when: cpu_value > cpu_threshold
+      when: cpu_value | float > cpu_threshold | float
 
     # =====================================================
     # FILTER APPROVED PROCESSES
@@ -52,7 +52,7 @@
             | selectattr('1', 'in', process_list)
             | list
           }}
-      when: cpu_value > cpu_threshold
+      when: cpu_value | float > cpu_threshold | float
 
     - name: Extract PIDs
       set_fact:
@@ -105,88 +105,51 @@
     # =====================================================
     - name: Set status code
       set_fact:
-        status_code: "{{ 1 if final_cpu_value < cpu_threshold else 2 }}"
+        status_code: "{{ 1 if process_killed else 2 }}"
 
     # =====================================================
-    # ESCALATION CHECK
-    # =====================================================
-    - name: Set escalation flag
-      set_fact:
-        escalation_required: true
-      when:
-        - cpu_value > cpu_threshold
-        - filtered_pids | default([]) | length == 0
-
-    # =====================================================
-    # WORKNOTES (UPDATED)
+    # WORKNOTES ✅ FINAL LOGIC
     # =====================================================
     - name: Set worknotes
       set_fact:
         worknotes: >-
           {{
+            (
+              'CPU Status: CPU exceeded threshold (' ~ cpu_threshold|string ~ '%)\n'
+              ~ 'Host: ' ~ hostname ~ '\n'
+              ~ 'Current CPU Utilization: ' ~ cpu_value|string ~ '%\n\n'
+
+              ~ '1. CPU Usage Before Remediation: ' ~ cpu_value|string ~ '%\n'
+              ~ '2. CPU Usage After Remediation: ' ~ final_cpu_value|string ~ '%\n\n'
+
+              ~ '3. High CPU Processes: ' ~ (filtered_names | join(', ')) ~ '\n'
+              ~ '4. Process IDs: ' ~ (filtered_pids | join(', ')) ~ '\n\n'
+
+              ~ '5. Action Taken: Processes terminated successfully'
+            )
+
+            if process_killed
+
+            else
 
             (
               'Current CPU utilization on (' ~ hostname ~ ') is (' ~ cpu_value|string ~ '%).\n'
               ~ 'This is within the defined threshold of (' ~ cpu_threshold|string ~ '%), so no action is required. Hence closing the ticket.'
             )
-
-            if cpu_value < cpu_threshold
-
-            else
-
-            (
-              'CPU Status: CPU exceeded threshold (' ~ cpu_threshold|string ~ '%)\n'
-              ~ 'Host: ' ~ hostname ~ '\n'
-              ~ 'Current CPU Utilization: ' ~ cpu_value|string ~ '%\n'
-              ~ '1. CPU Usage Before Remediation: ' ~ cpu_value|string ~ '%\n'
-              ~ '2. CPU Usage After Remediation: ' ~ final_cpu_value|string ~ '%\n'
-
-              ~ '3. High CPU Processes: '
-              ~ (filtered_names | join(', ') if filtered_names is defined and filtered_names|length > 0 else 'NA') ~ '\n'
-
-              ~ '4. Process IDs: '
-              ~ (filtered_pids | join(', ') if filtered_pids is defined and filtered_pids|length > 0 else 'NA') ~ '\n'
-
-              ~ '5. Action Taken: '
-              ~ (
-                  'Processes terminated successfully'
-                  if process_killed
-                  else 'No approved process found - escalation required'
-                )
-
-              ~ (
-                  '\n6. Note: CPU utilization is still high after remediation. Escalation required.'
-                  if final_cpu_value > cpu_threshold
-                  else ''
-                )
-            )
           }}
 
     # =====================================================
-    # RESPONSE MESSAGE (UPDATED)
+    # RESPONSE MESSAGE ✅ FINAL
     # =====================================================
     - name: Set response message
       set_fact:
         response_message: >-
           {{
             (
-              'Current CPU utilization is (' ~ cpu_value|string ~ '%) which is within the defined threshold (' ~ cpu_threshold|string ~ '%). No action required, ticket will be closed.'
-              if cpu_value < cpu_threshold
+              'CPU issue detected and remediation completed successfully.'
+              if process_killed
               else
-              (
-                'CPU exceeded threshold. '
-                ~ (
-                    'Issue escalated due to unknown processes.'
-                    if escalation_required | default(false)
-                    else
-                    (
-                      'Remediation successful.'
-                      if final_cpu_value < cpu_threshold
-                      else
-                      'CPU still high after remediation. Escalation required.'
-                    )
-                  )
-              )
+              'CPU utilization is within threshold. No action required. Ticket will be closed.'
             )
           }}
 
