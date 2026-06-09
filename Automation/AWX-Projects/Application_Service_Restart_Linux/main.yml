@@ -57,42 +57,36 @@
           ansible.builtin.set_fact:
             service_results: []
 
-        - name: Validate and restart requested services
+        - name: Restart requested services and build result list
+          ansible.builtin.set_fact:
+            service_results: "{{ service_results + [ {
+              'name': item,
+              'exists': (services[item] is defined) | default(false),
+              'restart_attempted': (services[item] is defined) | default(false),
+              'restart_success': (
+                services[item] is defined
+                and (restart_result is defined)
+                and not (restart_result.failed | default(false))
+              ),
+              'message': (
+                'Service exists and restart succeeded.'
+                if (services[item] is defined
+                    and (restart_result is defined)
+                    and not (restart_result.failed | default(false)))
+                else (
+                  'Service exists but restart failed or returned failure.'
+                  if (services[item] is defined)
+                  else 'Service not found on target host.'
+                )
+              )
+            } ] }}"
           vars:
-            svc_name: "{{ item }}"
-            svc_exists: "{{ (services[svc_name] is defined) | bool }}"
-          block:
-
-            - name: Restart service if it exists
-              ansible.builtin.service:
-                name: "{{ svc_name }}"
-                state: restarted
-              register: svc_restart_result
-              when: svc_exists
-              failed_when: false
-
-            - name: Build per-service result record
-              ansible.builtin.set_fact:
-                service_results: "{{ service_results + [ {
-                  'name': svc_name,
-                  'exists': svc_exists,
-                  'restart_attempted': svc_exists,
-                  'restart_success': (
-                    svc_exists
-                    and svc_restart_result is defined
-                    and not (svc_restart_result.failed | default(false))
-                  ),
-                  'message': (
-                    'Service exists and restart succeeded.'
-                    if (svc_exists
-                        and svc_restart_result is defined
-                        and not (svc_restart_result.failed | default(false)))
-                    else (
-                      'Service exists but restart failed or returned failure.'
-                      if svc_exists
-                      else 'Service not found on target host.'
-                    )
-                } ] }}"
+            restart_result: "{{ (services[item] is defined)
+               | ternary(
+                   lookup('ansible.builtin.pipe', 'systemctl restart ' ~ item, errors='ignore') | default(''),
+                   omit
+                 )
+            }}"
           loop: "{{ effective_service_names }}"
 
         - name: Derive overall success/failure counts
