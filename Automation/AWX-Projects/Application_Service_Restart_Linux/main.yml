@@ -4,6 +4,7 @@
   gather_facts: false
 
   vars:
+    # Job lifecycle status variables
     status_code: 0
     response_message: "Automation execution is in progress."
 
@@ -23,71 +24,143 @@
             that:
               - target_host is defined
               - (target_host | string | length) > 0
-              - service_name is defined
-              - (service_name | string | length) > 0
-            fail_msg: "Required parameter(s) missing: target_host and/or service_name."
+              - (service_names is defined and service_names | length > 0)
+                or (service_name is defined and (service_name | string | length) > 0)
+            fail_msg: >-
+              Required parameter(s) missing: Provide either a non-empty 'service_name'
+              for single-service mode or a non-empty 'service_names' list for
+              multi-service mode.
             success_msg: "Required parameters validated successfully."
 
-        - name: Update job status - parameter validation completed
+        - name: Determine effective service list
+          ansible.builtin.set_fact:
+            effective_service_names: >-
+              {% if service_names is defined and service_names | length > 0 %}
+              {{ service_names }}
+              {% else %}
+              [ "{{ service_name }}" ]
+              {% endif %}
+
+        - name: Update job status - parameter validation and service list determined
           ansible.builtin.include_role:
             name: Job_Updates
           vars:
             status_code: 0
-            response_message: "Parameter validation completed successfully. Automation is in progress."
+            response_message: >-
+              Parameter validation completed successfully. Automation is in progress.
+              Service list to process: {{ effective_service_names | join(', ') }}.
 
-        - name: Check if service exists on target Linux host
+        - name: Collect service facts from target Linux host
           ansible.builtin.service_facts:
 
-        - name: Validate that requested service exists
-          ansible.builtin.assert:
-            that:
-              - services[service_name] is defined
-            fail_msg: "The service '{{ service_name }}' was not found on the target host."
-            success_msg: "The service '{{ service_name }}' exists on the target host."
+        - name: Initialize per-service result list
+          ansible.builtin.set_fact:
+            service_results: []
 
-        - name: Update job status - service existence validated
-          ansible.builtin.include_role:
-            name: Job_Updates
-          vars:
-            status_code: 0
-            response_message: "Service '{{ service_name }}' exists on the target host. Proceeding with restart."
+        - name: Process each requested service
+          ansible.builtin.block:
+            - name: Validate that requested service exists
+              ansible.builtin.assert:
+                that:
+                  - services[item] is defined
+                fail_msg: "The service '{{ item }}' was not found on the target host."
+                success_msg: "The service '{{ item }}' exists on the target host."
+              register: service_exist_check
+              failed_when: false
 
-        - name: Restart the Linux service
-          ansible.builtin.service:
-            name: "{{ service_name }}"
-            state: restarted
-          register: service_restart_result
-          failed_when: false
+            - name: Restart the Linux service when it exists
+              ansible.builtin.service:
+                name: "{{ item }}"
+                state: restarted
+              register: service_restart_result
+              when: service_exist_check is succeeded
+              failed_when: false
 
-        - name: Evaluate restart result and set status facts
+            - name: Build per-service result record
+              ansible.builtin.set_fact:
+                service_results: "{{ service_results + [ {
+                  'name': item,
+                  'exists': (services[item] is defined),
+                  'restart_attempted': (service_exist_check is succeeded),
+                  'restart_success': (
+                    service_restart_result is defined
+                    and not (service_restart_result.failed | default(false))
+                  ) if (service_exist_check is succeeded) else false,
+                  'message': (
+                    'Service exists and restart succeeded.'
+                    if (service_exist_check is succeeded
+                        and service_restart_result is defined
+                        and not (service_restart_result.failed | default(false)))
+                    else (
+                      'Service exists but restart failed or returned failure.'
+                      if (service_exist_check is succeeded)
+                      else 'Service not found on target host.'
+                    )
+                } ] }}"
+          loop: "{{ effective_service_names }}"
+
+        - name: Derive overall success/failure counts
+          ansible.builtin.set_fact:
+            services_not_found: >-
+              {{ service_results
+                 | selectattr('exists', 'equalto', false)
+                 | list
+                 | length }}
+            services_restart_failed: >-
+              {{ service_results
+                 | selectattr('exists', 'equalto', true)
+                 | selectattr('restart_attempted', 'equalto', true)
+                 | selectattr('restart_success', 'equalto', false)
+                 | list
+                 | length }}
+            services_restart_success: >-
+              {{ service_results
+                 | selectattr('exists', 'equalto', true)
+                 | selectattr('restart_success', 'equalto', true)
+                 | list
+                 | length }}
+
+        - name: Set overall status_code and response_message
           ansible.builtin.set_fact:
             status_code: >-
-              {% if service_restart_result is failed or
-                    (service_restart_result.failed | default(false)) %}
+              {% if services_not_found > 0 or services_restart_failed > 0 %}
               -1
               {% else %}
               1
               {% endif %}
             response_message: >-
-              {% if service_restart_result is failed or
-                    (service_restart_result.failed | default(false)) %}
-              "Automation execution was not successful. The service '{{ service_name }}' could not be restarted and the issue is being transferred for manual review."
+              {% if services_not_found == 0 and services_restart_failed == 0 %}
+              Automation completed successfully. {{ services_restart_success }} service(s)
+              were restarted and are expected to be running.
               {% else %}
-              "Automation completed successfully. The service '{{ service_name }}' was restarted and is expected to be running."
+              Automation completed with issues. {{ services_restart_success }} service(s)
+              restarted successfully, {{ services_restart_failed }} failed to restart,
+              {{ services_not_found }} not found. The issue is being transferred for
+              manual review.
               {% endif %}
 
-        - name: Update job status - restart attempt completed
+        - name: Update job status - restart attempts completed
           ansible.builtin.include_role:
             name: Job_Updates
           vars:
             status_code: "{{ status_code }}"
             response_message: "{{ response_message }}"
 
+        - name: Show per-service restart summary
+          ansible.builtin.debug:
+            msg:
+              status_code: "{{ status_code }}"
+              response_message: "{{ response_message }}"
+              services_processed: "{{ effective_service_names }}"
+              service_results: "{{ service_results }}"
+
       rescue:
         - name: Set failed and transferred status due to unexpected error
           ansible.builtin.set_fact:
             status_code: -1
-            response_message: "Automation execution was not successful due to an unexpected error. The issue is being transferred for manual review."
+            response_message: >-
+              Automation execution was not successful due to an unexpected error.
+              The issue is being transferred for manual review.
 
         - name: Update job status - execution not successful and transferred
           ansible.builtin.include_role:
