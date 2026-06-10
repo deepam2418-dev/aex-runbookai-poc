@@ -157,10 +157,9 @@
           {% endif %}
 
     # Display
-    - debug:
-        msg:
-          status_code: "{{ status_code }}"
-          response_message: "{{ response_message }}"
+    - name: Debug response message
+      debug:
+        var: response_message
 
     # API update
     - name: Update iautomate
