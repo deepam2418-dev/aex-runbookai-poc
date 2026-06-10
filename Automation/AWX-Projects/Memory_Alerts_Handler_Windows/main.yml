@@ -1,3 +1,4 @@
+--- 
 # =========================================================
 # PLAY - WINDOWS MEMORY MONITORING & AUTO REMEDIATION
 # =========================================================
@@ -8,9 +9,6 @@
   vars:
     memory_threshold: "{{ threshold | default(80) }}"
 
-    # =====================================================
-    # PROCESSES ALLOWED FOR REMEDIATION
-    # =====================================================
     remediation_process_names:
       - chrome
       - notepad
@@ -23,31 +21,22 @@
     - name: Fetch current memory usage
       win_shell: |
         $os = Get-CimInstance Win32_OperatingSystem
-
         $used = $os.TotalVisibleMemorySize - $os.FreePhysicalMemory
-
         $percent = ($used / $os.TotalVisibleMemorySize) * 100
-
         [math]::Round($percent, 2)
       register: memory_output
       changed_when: false
 
-    # =====================================================
-    # SET MEMORY FACT
-    # =====================================================
     - name: Set memory usage fact
       set_fact:
         memory_usage: "{{ memory_output.stdout | trim | float }}"
 
-    # =====================================================
-    # DISPLAY CURRENT MEMORY USAGE
-    # =====================================================
     - name: Display memory usage
       debug:
         msg: "Current Memory Usage: {{ memory_usage }}%"
 
     # =====================================================
-    # CHECK IF THRESHOLD EXCEEDED
+    # GET HIGH MEMORY PROCESSES
     # =====================================================
     - name: Get top memory consuming processes
       win_shell: |
@@ -61,9 +50,6 @@
       when:
         - memory_usage > memory_threshold
 
-    # =====================================================
-    # DISPLAY TOP PROCESSES
-    # =====================================================
     - name: Display top processes
       debug:
         var: top_processes.stdout
@@ -82,7 +68,6 @@
         )
 
         foreach ($proc in $processes) {
-
           Get-Process -Name $proc -ErrorAction SilentlyContinue |
           Stop-Process -Force -ErrorAction SilentlyContinue
         }
@@ -118,34 +103,25 @@
         - remediation_performed | bool
 
     # =====================================================
-    # RECHECK MEMORY USAGE
+    # RECHECK MEMORY
     # =====================================================
     - name: Recheck memory usage
       win_shell: |
         $os = Get-CimInstance Win32_OperatingSystem
-
         $used = $os.TotalVisibleMemorySize - $os.FreePhysicalMemory
-
         $percent = ($used / $os.TotalVisibleMemorySize) * 100
-
         [math]::Round($percent, 2)
       register: memory_after
       changed_when: false
       when:
         - remediation_performed | bool
 
-    # =====================================================
-    # SET FINAL MEMORY USAGE
-    # =====================================================
     - name: Set final memory usage
       set_fact:
         final_memory_usage: "{{ memory_after.stdout | trim | float }}"
       when:
         - remediation_performed | bool
 
-    # =====================================================
-    # FALLBACK IF NO REMEDIATION
-    # =====================================================
     - name: Set fallback final memory usage
       set_fact:
         final_memory_usage: "{{ memory_usage }}"
@@ -153,7 +129,7 @@
         - final_memory_usage is not defined
 
     # =====================================================
-    # FINAL STATUS & RESPONSE
+    # FINAL STATUS & RESPONSE (ONLY UPDATED)
     # =====================================================
     - name: Set final response
       set_fact:
@@ -166,51 +142,37 @@
             else 2
           }}
 
-        response_message: >-
-          {{
-            (
-              'Memory usage on host ' ~ hostname ~
-              ' was detected at ' ~
-              (memory_usage | string) ~
-              '%, which is below the configured threshold of ' ~
-              (memory_threshold | string) ~
-              '%. No remediation was required.'
-            )
+        response_message: |
+          {% if memory_usage | float < memory_threshold | float %}
+          Current Memory utilization is {{ memory_usage }}%. Which is within the defined threshold {{ memory_threshold }}%. No action required, Hence closing the ticket.
+          {% else %}
 
-            if (memory_usage | float) <
-               (memory_threshold | float)
+          {% if final_memory_usage | float < memory_threshold | float %}
+             Memory Status: Issue Resolved After Remediation
+          {% else %}
+             Memory Status: Still High - Escalation Required
+          {% endif %}
 
-            else
+             Memory Utilization Before Remediation: {{ memory_usage }}%
 
-            (
-              'Memory usage on host ' ~ hostname ~
-              ' was initially detected at ' ~
-              (memory_usage | string) ~
-              '%, exceeding the configured threshold of ' ~
-              (memory_threshold | string) ~
-              '%. ' ~
+             Memory Utilization After Remediation: {{ final_memory_usage }}%
 
-              (
-                'Remediation was performed by terminating allowed processes (' ~
-                remediation_process_names | join(', ') ~ '). '
-                if remediation_performed | bool
-                else
-                'No remediation actions were performed. '
-              ) ~
+             High Memory Processes: {{ top_processes.stdout | default('None') }}
 
-              'Post-remediation memory utilization is ' ~
-              (final_memory_usage | string) ~
-              '%. ' ~
+             Approved Processes: {{ remediation_process_names | join(', ') if remediation_performed | bool else 'None' }}
 
-              (
-                'Memory utilization is now within acceptable limits. Marking the ticket as resolved.'
-                if (final_memory_usage | float) <
-                   (memory_threshold | float)
-                else
-                'Memory utilization remains high after remediation. Escalating the ticket.'
-              )
-            )
-          }}
+             Non-Approved Processes: None
+
+             Process IDs (PIDs): None
+
+             Action Taken:
+          {% if remediation_performed | bool %}
+             Remediation performed by terminating allowed processes.
+          {% else %}
+             No remediation actions were performed.
+          {% endif %}
+
+          {% endif %}
 
     # =====================================================
     # DISPLAY FINAL RESULT
