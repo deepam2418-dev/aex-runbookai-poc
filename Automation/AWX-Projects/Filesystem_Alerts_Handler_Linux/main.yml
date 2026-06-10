@@ -156,19 +156,19 @@
           {% else %}
 
           {% if final_filesystem_usage | float < filesystem_threshold | float %}
-          1. Filesystem Status: Issue Resolved After Remediation
+             Filesystem Status: Issue Resolved After Remediation
           {% else %}
-          1. Filesystem Status: Still High - Escalation Required
+             Filesystem Status: Still High - Escalation Required
           {% endif %}
 
-          2. Filesystem Usage Before Remediation: {{ filesystem_usage }}%
+             Filesystem Usage Before Remediation: {{ filesystem_usage }}%
 
-          3. Filesystem Usage After Remediation: {{ final_filesystem_usage }}%
+             Filesystem Usage After Remediation: {{ final_filesystem_usage }}%
 
-          4. Files Identified For Cleanup: {{ file_details }}
+             Files Identified For Cleanup: {{ file_details }}
 
-          5. Action Taken: {{ action_details }}
-
+              Action Taken: {{ action_details }}
+ 
           {% endif %}
 
     # =====================================================
