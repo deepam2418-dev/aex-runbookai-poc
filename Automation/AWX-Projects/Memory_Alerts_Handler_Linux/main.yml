@@ -1,13 +1,13 @@
 # =========================================================
-# PLAY - MEMORY MONITORING & AUTO REMEDIATION (LINUX)
+# MEMORY MONITORING & AUTO REMEDIATION
 # =========================================================
-- name: Linux Memory Monitoring and Auto Remediation
+- name: Memory Monitoring and Auto Remediation
   hosts: "{{ hostname }}"
-  become: yes
   gather_facts: no
+  become: yes
 
   vars:
-    memory_threshold: "{{ threshold | default(80) | float }}"
+    memory_threshold: "{{ threshold | default(80) }}"
 
     process_list:
       - testprocess
@@ -15,153 +15,463 @@
   tasks:
 
     # =====================================================
-    # GET CURRENT MEMORY USAGE
+    # CHECK CURRENT MEMORY USAGE
     # =====================================================
-    - name: Fetch current memory usage
-      shell: free | awk '/Mem:/ {printf("%.2f"), $3/$2 * 100}'
-      register: memory_usage
+    - name: Get current Memory usage
+      shell: "free | awk '/Mem:/ {printf(\"%.2f\", $3/$2 * 100)}'"
+      register: current_memory
       changed_when: false
 
-    - name: Set memory value
+    - name: Set current Memory value
       set_fact:
-        memory_value: "{{ memory_usage.stdout | trim | float }}"
+        current_memory_value: "{{ current_memory.stdout | trim | float | round(2) }}"
 
     # =====================================================
-    # GET TOP MEMORY PROCESSES
+    # INITIALIZE VARIABLES
     # =====================================================
-    - name: Get top memory processes
-      shell: ps -eo pid,comm,%mem --sort=-%mem | head -n 10
-      register: top_memory_processes
+    - name: Initialize variables
+      set_fact:
+        filtered_processes: []
+        filtered_pids: []
+        filtered_names: []
+        process_killed: false
+        final_memory_value: "{{ current_memory_value }}"
+        high_memory_details: ""
+        pid_details: ""
+        action_details: ""
+        approved_processes: ""
+        non_approved_processes: ""
+
+    # =====================================================
+    # GET HIGH MEMORY PROCESSES
+    # =====================================================
+    - name: Get high memory processes
+      shell: |
+        ps -eo pid,comm,%mem --no-headers | awk '$3 > {{ memory_threshold }} {print $1, $2, $3}'
+      register: high_memory
       changed_when: false
-      when: memory_value | float > memory_threshold | float
+      when:
+        - current_memory_value | float >= memory_threshold | float
+
+    # =====================================================
+    # STORE HIGH MEMORY DETAILS
+    # =====================================================
+    - name: Prepare high memory details
+      set_fact:
+        high_memory_details: "{{ high_memory.stdout_lines | join(' | ') if high_memory.stdout_lines is defined else 'None' }}"
+      when:
+        - current_memory_value | float >= memory_threshold | float
 
     # =====================================================
     # FILTER APPROVED PROCESSES
     # =====================================================
-    - name: Filter approved processes
+    - name: Filter only approved process names
       set_fact:
         filtered_processes: >-
           {{
-            top_memory_processes.stdout_lines[1:]
+            high_memory.stdout_lines
             | map('split')
             | selectattr('1', 'in', process_list)
             | list
           }}
-      when: memory_value | float > memory_threshold | float
+      when:
+        - current_memory_value | float >= memory_threshold | float
 
     # =====================================================
     # EXTRACT DETAILS
     # =====================================================
-    - name: Extract PIDs
+    - name: Extract process PIDs
       set_fact:
         filtered_pids: "{{ filtered_processes | map('first') | list }}"
-      when: filtered_processes is defined
+      when:
+        - current_memory_value | float >= memory_threshold | float
 
-    - name: Extract names
+    - name: Extract process names
       set_fact:
         filtered_names: "{{ filtered_processes | map(attribute='1') | list }}"
-      when: filtered_processes is defined
+      when:
+        - current_memory_value | float >= memory_threshold | float
+
+    # =====================================================
+    # PID DETAILS
+    # =====================================================
+    - name: Prepare PID details
+      set_fact:
+        pid_details: "{{ filtered_pids | join(', ') if filtered_pids | length > 0 else 'None' }}"
+      when:
+        - current_memory_value | float >= memory_threshold | float
+
+    # =====================================================
+    # CLASSIFY APPROVED / NON-APPROVED
+    # =====================================================
+    - name: Approved processes
+      set_fact:
+        approved_processes: "{{ filtered_names | unique | join(', ') if filtered_names | length > 0 else 'None' }}"
+      when:
+        - current_memory_value | float >= memory_threshold | float
+
+    - name: Non-approved processes
+      set_fact:
+        non_approved_processes: >-
+          {{
+            high_memory.stdout_lines
+            | map('split')
+            | map(attribute=1)
+            | difference(process_list)
+            | unique
+            | join(', ')
+            if high_memory.stdout_lines is defined else 'None'
+          }}
+      when:
+        - current_memory_value | float >= memory_threshold | float
 
     # =====================================================
     # KILL PROCESSES
     # =====================================================
-    - name: Kill processes
-      shell: kill -9 {{ item }}
+    - name: Kill filtered high Memory processes
+      shell: "kill -9 {{ item }}"
       loop: "{{ filtered_pids }}"
+      register: kill_results
       ignore_errors: yes
       when:
-        - filtered_pids is defined
+        - current_memory_value | float >= memory_threshold | float
         - filtered_pids | length > 0
+
+    # =====================================================
+    # ACTION DETAILS
+    # =====================================================
+    - name: Prepare action details
+      set_fact:
+        action_details: >-
+          {% if filtered_pids | length > 0 %}
+          Killed processes: {{ filtered_pids | join(', ') }}
+          {% else %}
+          No approved processes found for termination
+          {% endif %}
 
     - name: Set remediation status
       set_fact:
-        process_killed: "{{ filtered_pids is defined and filtered_pids | length > 0 }}"
+        process_killed: true
+      when:
+        - filtered_pids | length > 0
 
     # =====================================================
     # WAIT
     # =====================================================
-    - name: Wait
+    - name: Wait for stabilization
       pause:
         seconds: 10
-      when: process_killed
+      when:
+        - process_killed | bool
 
     # =====================================================
-    # FINAL MEMORY CHECK
+    # RECHECK MEMORY
     # =====================================================
-    - name: Fetch final memory usage
-      shell: free | awk '/Mem:/ {printf("%.2f"), $3/$2 * 100}'
-      register: final_memory_usage
+    - name: Get memory after remediation
+      shell: "free | awk '/Mem:/ {printf(\"%.2f\", $3/$2 * 100)}'"
+      register: memory_usage
       changed_when: false
+      when:
+        - process_killed | bool
 
     - name: Set final memory value
       set_fact:
-        final_memory_value: "{{ final_memory_usage.stdout | trim | float }}"
+        final_memory_value: "{{ memory_usage.stdout | trim | float | round(2) }}"
+      when:
+        - process_killed | bool
 
     # =====================================================
     # STATUS CODE
     # =====================================================
-    - name: Set status code
+    - name: Set status
       set_fact:
-        status_code: "{{ 1 if process_killed else 2 }}"
-
-    # =====================================================
-    # WORKNOTES ✅ FINAL LOGIC
-    # =====================================================
-    - name: Set worknotes
-      set_fact:
-        worknotes: >-
+        status_code: >-
           {{
-            (
-              'Memory Status: Memory exceeded threshold (' ~ memory_threshold|string ~ '%)\n'
-              ~ 'Host: ' ~ hostname ~ '\n'
-              ~ 'Current Memory Utilization: ' ~ memory_value|string ~ '%\n\n'
-
-              ~ '1. Memory Usage Before Remediation: ' ~ memory_value|string ~ '%\n'
-              ~ '2. Memory Usage After Remediation: ' ~ final_memory_value|string ~ '%\n\n'
-
-              ~ '3. High Memory Processes: ' ~ (filtered_names | join(', ')) ~ '\n'
-              ~ '4. Process IDs: ' ~ (filtered_pids | join(', ')) ~ '\n\n'
-
-              ~ '5. Action Taken: Processes terminated successfully'
-            )
-
-            if process_killed
-
-            else
-
-            (
-              'Current memory utilization on (' ~ hostname ~ ') is (' ~ memory_value|string ~ '%).\n'
-              ~ 'This is within the defined threshold of (' ~ memory_threshold|string ~ '%), so no action is required. Hence closing the ticket.'
-            )
+            1 if (final_memory_value | float) < (memory_threshold | float)
+            else 2
           }}
 
     # =====================================================
-    # RESPONSE MESSAGE ✅ FINAL
+    # FINAL RESPONSE / WORKNOTES (CPU STYLE)
     # =====================================================
     - name: Set response message
       set_fact:
-        response_message: >-
-          {{
-            (
-              'Memory issue detected and remediation completed successfully.'
-              if process_killed
-              else
-              'Memory utilization is within threshold. No action required. Ticket will be closed.'
-            )
-          }}
+        response_message: |
+          {% if current_memory_value | float < memory_threshold | float %}
+          Current Memory utilization is {{ current_memory_value }}%. Which is within the defined threshold {{ memory_threshold }}%. No action required, Hence closing the ticket.
+          {% else %}
+          {% if final_memory_value | float < memory_threshold | float %}
+           Memory Status: Issue Resolved After Remediation
+          {% else %}
+           Memory Status: Still High - Escalation Required
+          {% endif %}
+
+           Memory Utilization Before Remediation: {{ current_memory_value }}%
+
+           Memory Utilization After Remediation: {{ final_memory_value }}%
+
+           High Memory Processes: {{ high_memory_details }}
+
+           Approved Processes: {{ approved_processes }}
+
+           Non-Approved Processes: {{ non_approved_processes }}
+
+           Process IDs (PIDs): {{ pid_details }}
+
+           Action Taken: {{ action_details }}
+          {% endif %}
 
     # =====================================================
-    # FINAL OUTPUT
+    # DISPLAY
     # =====================================================
-    - name: Display final response
+    - name: Output
       debug:
         msg:
           status_code: "{{ status_code }}"
           response_message: "{{ response_message }}"
-          worknotes: "{{ worknotes }}"
 
     # =====================================================
-    # UPDATE IAUTOMATE
+    # IAUTOMATE UPDATE
+    # =====================================================
+    - name: Update iautomate status
+      uri:
+        url: "http://10.224.11.147:8080/v2/runbooks/orgentityid/1/updaterunbookstatusv2"
+        validate_certs: no
+        user: "iautomate@syneoshealth.com"
+        password: "# =========================================================
+# MEMORY MONITORING & AUTO REMEDIATION
+# =========================================================
+- name: Memory Monitoring and Auto Remediation
+  hosts: "{{ hostname }}"
+  gather_facts: no
+  become: yes
+
+  vars:
+    memory_threshold: "{{ threshold | default(80) }}"
+
+    process_list:
+      - testprocess
+
+  tasks:
+
+    # =====================================================
+    # CHECK CURRENT MEMORY USAGE
+    # =====================================================
+    - name: Get current Memory usage
+      shell: "free | awk '/Mem:/ {printf(\"%.2f\", $3/$2 * 100)}'"
+      register: current_memory
+      changed_when: false
+
+    - name: Set current Memory value
+      set_fact:
+        current_memory_value: "{{ current_memory.stdout | trim | float | round(2) }}"
+
+    # =====================================================
+    # INITIALIZE VARIABLES
+    # =====================================================
+    - name: Initialize variables
+      set_fact:
+        filtered_processes: []
+        filtered_pids: []
+        filtered_names: []
+        process_killed: false
+        final_memory_value: "{{ current_memory_value }}"
+        high_memory_details: ""
+        pid_details: ""
+        action_details: ""
+        approved_processes: ""
+        non_approved_processes: ""
+
+    # =====================================================
+    # GET HIGH MEMORY PROCESSES
+    # =====================================================
+    - name: Get high memory processes
+      shell: |
+        ps -eo pid,comm,%mem --no-headers | awk '$3 > {{ memory_threshold }} {print $1, $2, $3}'
+      register: high_memory
+      changed_when: false
+      when:
+        - current_memory_value | float >= memory_threshold | float
+
+    # =====================================================
+    # STORE HIGH MEMORY DETAILS
+    # =====================================================
+    - name: Prepare high memory details
+      set_fact:
+        high_memory_details: "{{ high_memory.stdout_lines | join(' | ') if high_memory.stdout_lines is defined else 'None' }}"
+      when:
+        - current_memory_value | float >= memory_threshold | float
+
+    # =====================================================
+    # FILTER APPROVED PROCESSES
+    # =====================================================
+    - name: Filter only approved process names
+      set_fact:
+        filtered_processes: >-
+          {{
+            high_memory.stdout_lines
+            | map('split')
+            | selectattr('1', 'in', process_list)
+            | list
+          }}
+      when:
+        - current_memory_value | float >= memory_threshold | float
+
+    # =====================================================
+    # EXTRACT DETAILS
+    # =====================================================
+    - name: Extract process PIDs
+      set_fact:
+        filtered_pids: "{{ filtered_processes | map('first') | list }}"
+      when:
+        - current_memory_value | float >= memory_threshold | float
+
+    - name: Extract process names
+      set_fact:
+        filtered_names: "{{ filtered_processes | map(attribute='1') | list }}"
+      when:
+        - current_memory_value | float >= memory_threshold | float
+
+    # =====================================================
+    # PID DETAILS
+    # =====================================================
+    - name: Prepare PID details
+      set_fact:
+        pid_details: "{{ filtered_pids | join(', ') if filtered_pids | length > 0 else 'None' }}"
+      when:
+        - current_memory_value | float >= memory_threshold | float
+
+    # =====================================================
+    # CLASSIFY APPROVED / NON-APPROVED
+    # =====================================================
+    - name: Approved processes
+      set_fact:
+        approved_processes: "{{ filtered_names | unique | join(', ') if filtered_names | length > 0 else 'None' }}"
+      when:
+        - current_memory_value | float >= memory_threshold | float
+
+    - name: Non-approved processes
+      set_fact:
+        non_approved_processes: >-
+          {{
+            high_memory.stdout_lines
+            | map('split')
+            | map(attribute=1)
+            | difference(process_list)
+            | unique
+            | join(', ')
+            if high_memory.stdout_lines is defined else 'None'
+          }}
+      when:
+        - current_memory_value | float >= memory_threshold | float
+
+    # =====================================================
+    # KILL PROCESSES
+    # =====================================================
+    - name: Kill filtered high Memory processes
+      shell: "kill -9 {{ item }}"
+      loop: "{{ filtered_pids }}"
+      register: kill_results
+      ignore_errors: yes
+      when:
+        - current_memory_value | float >= memory_threshold | float
+        - filtered_pids | length > 0
+
+    # =====================================================
+    # ACTION DETAILS
+    # =====================================================
+    - name: Prepare action details
+      set_fact:
+        action_details: >-
+          {% if filtered_pids | length > 0 %}
+          Killed processes: {{ filtered_pids | join(', ') }}
+          {% else %}
+          No approved processes found for termination
+          {% endif %}
+
+    - name: Set remediation status
+      set_fact:
+        process_killed: true
+      when:
+        - filtered_pids | length > 0
+
+    # =====================================================
+    # WAIT
+    # =====================================================
+    - name: Wait for stabilization
+      pause:
+        seconds: 10
+      when:
+        - process_killed | bool
+
+    # =====================================================
+    # RECHECK MEMORY
+    # =====================================================
+    - name: Get memory after remediation
+      shell: "free | awk '/Mem:/ {printf(\"%.2f\", $3/$2 * 100)}'"
+      register: memory_usage
+      changed_when: false
+      when:
+        - process_killed | bool
+
+    - name: Set final memory value
+      set_fact:
+        final_memory_value: "{{ memory_usage.stdout | trim | float | round(2) }}"
+      when:
+        - process_killed | bool
+
+    # =====================================================
+    # STATUS CODE
+    # =====================================================
+    - name: Set status
+      set_fact:
+        status_code: >-
+          {{
+            1 if (final_memory_value | float) < (memory_threshold | float)
+            else 2
+          }}
+
+    # =====================================================
+    # FINAL RESPONSE / WORKNOTES (CPU STYLE)
+    # =====================================================
+    - name: Set response message
+      set_fact:
+        response_message: |
+          {% if current_memory_value | float < memory_threshold | float %}
+          Current Memory utilization is {{ current_memory_value }}%. Which is within the defined threshold {{ memory_threshold }}%. No action required, Hence closing the ticket.
+          {% else %}
+          {% if final_memory_value | float < memory_threshold | float %}
+           Memory Status: Issue Resolved After Remediation
+          {% else %}
+           Memory Status: Still High - Escalation Required
+          {% endif %}
+
+           Memory Utilization Before Remediation: {{ current_memory_value }}%
+
+           Memory Utilization After Remediation: {{ final_memory_value }}%
+
+           High Memory Processes: {{ high_memory_details }}
+
+           Approved Processes: {{ approved_processes }}
+
+           Non-Approved Processes: {{ non_approved_processes }}
+
+           Process IDs (PIDs): {{ pid_details }}
+
+           Action Taken: {{ action_details }}
+          {% endif %}
+
+    # =====================================================
+    # DISPLAY
+    # =====================================================
+    - name: Output
+      debug:
+        msg:
+          status_code: "{{ status_code }}"
+          response_message: "{{ response_message }}"
+
+    # =====================================================
+    # IAUTOMATE UPDATE
     # =====================================================
     - name: Update iautomate status
       uri:
@@ -177,4 +487,11 @@
         body: "{{ lookup('template','status.json.j2') }}"
       delegate_to: localhost
       become: no
-      register: status_update_iautomate
+        method: PUT
+        status_code: 200
+        return_content: yes
+        force_basic_auth: yes
+        body_format: json
+        body: "{{ lookup('template','status.json.j2') }}"
+      delegate_to: localhost
+      become: no
