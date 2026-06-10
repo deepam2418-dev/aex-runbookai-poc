@@ -1,3 +1,4 @@
+--- 
 # =========================================================
 # PLAY - WINDOWS FILESYSTEM MONITORING & AUTO REMEDIATION
 # =========================================================
@@ -46,16 +47,10 @@
       register: fs_output
       changed_when: false
 
-    # =====================================================
-    # SET FILESYSTEM FACT
-    # =====================================================
     - name: Set filesystem fact
       set_fact:
         filesystem_usage: "{{ fs_output.stdout | trim | float }}"
 
-    # =====================================================
-    # DISPLAY FILESYSTEM USAGE
-    # =====================================================
     - name: Display filesystem usage
       debug:
         msg: "Current Filesystem Usage: {{ filesystem_usage }}%"
@@ -86,9 +81,6 @@
       when:
         - filesystem_usage > filesystem_threshold
 
-    # =====================================================
-    # DISPLAY EXCEEDED FILESYSTEMS
-    # =====================================================
     - name: Display exceeded filesystems
       debug:
         var: exceeded_fs.stdout_lines
@@ -108,9 +100,6 @@
       when:
         - filesystem_usage > filesystem_threshold
 
-    # =====================================================
-    # DISPLAY FILES FOR CLEANUP
-    # =====================================================
     - name: Display files for cleanup
       debug:
         msg: "{{ item.path }}"
@@ -127,8 +116,6 @@
         path: "{{ item.path }}"
         state: absent
       loop: "{{ files_to_delete.files }}"
-      loop_control:
-        label: "{{ item.path }}"
       register: delete_output
       when:
         - filesystem_usage > filesystem_threshold
@@ -187,21 +174,12 @@
       when:
         - cleanup_performed | bool
 
-    # =====================================================
-    # SET FINAL FILESYSTEM USAGE
-    # =====================================================
     - name: Set final filesystem usage
       set_fact:
-        final_filesystem_usage: >-
-          {{
-            fs_after.stdout | trim | float
-          }}
+        final_filesystem_usage: "{{ fs_after.stdout | trim | float }}"
       when:
         - cleanup_performed | bool
 
-    # =====================================================
-    # FALLBACK IF NO CLEANUP
-    # =====================================================
     - name: Set fallback filesystem usage
       set_fact:
         final_filesystem_usage: "{{ filesystem_usage }}"
@@ -209,7 +187,7 @@
         - final_filesystem_usage is not defined
 
     # =====================================================
-    # FINAL STATUS & RESPONSE
+    # FINAL STATUS & RESPONSE (UPDATED TO MATCH LINUX STYLE)
     # =====================================================
     - name: Set final response
       set_fact:
@@ -222,50 +200,34 @@
             else 2
           }}
 
-        response_message: >-
-          {{
-            (
-              'Filesystem usage on host ' ~ hostname ~
-              ' was detected at ' ~
-              (filesystem_usage | string) ~
-              '%, which is below the configured threshold of ' ~
-              (filesystem_threshold | string) ~
-              '%. No remediation was required.'
-            )
+        response_message: |
+          {% if filesystem_usage | float < filesystem_threshold | float %}
+          Current Filesystem utilization is {{ filesystem_usage }}%, which is within threshold {{ filesystem_threshold }}%.
+          No action required. Closing the ticket.
 
-            if (filesystem_usage | float) < (filesystem_threshold | float)
+          {% else %}
 
-            else
+          {% if final_filesystem_usage | float < filesystem_threshold | float %}
+             Filesystem Status: Issue Resolved After Remediation
+          {% else %}
+             Filesystem Status: Still High - Escalation Required
+          {% endif %}
 
-            (
-              'Filesystem usage on host ' ~ hostname ~
-              ' was initially detected at ' ~
-              (filesystem_usage | string) ~
-              '%, exceeding the configured threshold of ' ~
-              (filesystem_threshold | string) ~
-              '%. ' ~
+             Filesystem Usage Before Remediation: {{ filesystem_usage }}%
 
-              (
-                'Cleanup was performed in allowed directories (' ~
-                allowed_cleanup_dirs | join(', ') ~ '). '
-                if cleanup_performed | bool
-                else
-                'No eligible files were found for cleanup. '
-              ) ~
+             Filesystem Usage After Remediation: {{ final_filesystem_usage }}%
 
-              'Post-remediation filesystem utilization is ' ~
-              (final_filesystem_usage | string) ~
-              '%. ' ~
+             Files Identified For Cleanup: {{ files_to_delete.files | map(attribute='path') | list | join(' | ') if (files_to_delete is defined and files_to_delete.files | length > 0) else 'None' }}
 
-              (
-                'Filesystem usage is now within acceptable limits. Marking the ticket as resolved.'
-                if (final_filesystem_usage | float) <
-                  (filesystem_threshold | float)
-                else
-                'Filesystem usage remains high after remediation. Escalating the ticket.'
-              )
-            )
-          }}
+             Action Taken:
+          {% if cleanup_performed | bool %}
+             Cleanup executed for eligible files.
+          {% else %}
+             No eligible files found for cleanup
+          {% endif %}
+
+          {% endif %}
+
     # =====================================================
     # DISPLAY FINAL RESULT
     # =====================================================
