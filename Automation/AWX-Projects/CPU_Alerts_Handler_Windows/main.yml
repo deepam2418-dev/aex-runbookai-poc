@@ -7,7 +7,7 @@
   gather_facts: no
 
   vars:
-    cpu_threshold: "{{ threshold | default(80) }}"
+    cpu_threshold: "{{ threshold | default(40) }}"
 
     process_list:
       - powershell
