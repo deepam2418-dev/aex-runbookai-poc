@@ -1,4 +1,4 @@
----
+--- 
 # =========================================================
 # PLAY 1 - WINDOWS CPU MONITORING & AUTO REMEDIATION
 # =========================================================
@@ -9,11 +9,8 @@
   vars:
     cpu_threshold: "{{ threshold | default(80) }}"
 
-    # Approved processes for remediation
     process_list:
       - powershell
-      # - chrome
-      # - java
 
   tasks:
 
@@ -172,71 +169,34 @@
           }}
 
     # =====================================================
-    # SET RESPONSE MESSAGE
+    # UPDATED WORKNOTES (ONLY CHANGE)
     # =====================================================
     - name: Set response message
       set_fact:
-        response_message: >-
-          {{
+        response_message: |
+          {% if cpu_value | float < cpu_threshold | float %}
+          Current CPU utilization is {{ cpu_value }}%. Which is within the defined threshold {{ cpu_threshold }}%. No action required, Hence closing the ticket.
+          {% else %}
+          {% if final_cpu_value | float < cpu_threshold | float %}
+           CPU Status: Issue Resolved After Remediation
+          {% else %}
+           CPU Status: Still High - Escalation Required
+          {% endif %}
 
-            (
-              'CPU usage on host ' ~ hostname ~
-              ' is currently at ' ~
-              (cpu_value | string) ~
-              '%, which is within the configured threshold of ' ~
-              (cpu_threshold | string) ~
-              '%. No remediation was required. Marking the ticket as resolved.'
-            )
+           CPU Utilization Before Remediation: {{ cpu_value }}%
 
-            if (cpu_value | float) < (cpu_threshold | float)
+           CPU Utilization After Remediation: {{ final_cpu_value }}%
 
-            else
+           High CPU Processes: {{ windows_process_output.stdout_lines | default(['None']) | join(' | ') }}
 
-            (
+           Approved Processes: {{ process_list | join(', ') if filtered_pids | length > 0 else 'None' }}
 
-              (
-                'CPU usage on host ' ~ hostname ~
-                ' was initially detected at ' ~
-                (cpu_value | string) ~
-                '%, exceeding the configured threshold of ' ~
-                (cpu_threshold | string) ~ '%. '
-              )
+           Non-Approved Processes: None
 
-              ~
+           Process IDs (PIDs): {{ filtered_pids | join(', ') if filtered_pids | length > 0 else 'None' }}
 
-              (
-                'Approved high CPU processes identified: ' ~
-                (process_list | join(', ')) ~ '. '
-                if filtered_pids | length > 0
-                else
-                'No approved high CPU processes were identified for remediation. '
-              )
-
-              ~
-
-              (
-                'Automation terminated the matching processes with PIDs: ' ~
-                (filtered_pids | join(', ')) ~ '. '
-                if filtered_pids | length > 0
-                else
-                ''
-              )
-
-              ~
-
-              (
-                'Post-remediation CPU utilization is ' ~
-                (final_cpu_value | string) ~
-                '%. CPU utilization returned to normal levels. Marking the ticket as resolved.'
-                if (final_cpu_value | float) < (cpu_threshold | float)
-                else
-                'Post-remediation CPU utilization remains at ' ~
-                (final_cpu_value | string) ~
-                '%, which is still above the configured threshold. Escalating the ticket for further investigation.'
-              )
-
-            )
-          }}
+           Action Taken: {% if filtered_pids | length > 0 %}Killed processes: {{ filtered_pids | join(', ') }}{% else %}No approved processes found for termination{% endif %}
+          {% endif %}
 
     # =====================================================
     # DISPLAY FINAL RESPONSE
