@@ -227,3 +227,4 @@
       delegate_to: localhost
       register: status_update_iautomate
  
+ 
