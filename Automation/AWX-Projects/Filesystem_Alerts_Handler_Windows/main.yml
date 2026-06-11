@@ -1,21 +1,20 @@
----
- 
+--- 
 - name: Windows Filesystem Monitoring and Auto Remediation
   hosts: "{{ hostname }}"
   gather_facts: no
- 
+
   vars:
     filesystem_threshold: "{{ threshold | default(80) }}"
     allowed_cleanup_dirs:
-      - "C://temp//fstest"
-      - "C://Windows//Temp"
+      - "C:\\temp\\fstest"
+      - "C:\\Windows\\Temp"
     cleanup_pattern:
       - "*.bin"
       - "*.tmp"
       - "*.md"
- 
+
   tasks:
- 
+
     # =====================================================
     # FETCH CURRENT FILESYSTEM USAGE
     # =====================================================
@@ -34,39 +33,11 @@
         Write-Output $maxUsage
       register: fs_output
       changed_when: false
- 
+
     - name: Set filesystem fact
       set_fact:
         filesystem_usage: "{{ fs_output.stdout | trim | float }}"
- 
-    - name: Display filesystem usage
-      debug:
-        msg: "Current Filesystem Usage: {{ filesystem_usage }}%"
- 
-    # =====================================================
-    # GET FILESYSTEMS EXCEEDING THRESHOLD
-    # =====================================================
-    - name: Get filesystems exceeding threshold
-      win_shell: |
-        $threshold = {{ filesystem_threshold }}
-        Get-WmiObject Win32_LogicalDisk -Filter "DriveType=3" |
-        ForEach-Object {
-          if ($_.Size -gt 0) {
-            $usage = [math]::Round((($_.Size - $_.FreeSpace) / $_.Size) * 100, 2)
-            if ($usage -gt $threshold) {
-              Write-Output "$($_.DeviceID) $usage%"
-            }
-          }
-        }
-      register: exceeded_fs
-      changed_when: false
-      when: filesystem_usage > filesystem_threshold
- 
-    - name: Display exceeded filesystems
-      debug:
-        var: exceeded_fs.stdout_lines
-      when: filesystem_usage > filesystem_threshold
- 
+
     # =====================================================
     # FIND FILES FOR CLEANUP
     # =====================================================
@@ -78,16 +49,8 @@
         file_type: file
       register: files_to_delete
       when: filesystem_usage > filesystem_threshold
- 
-    - name: Display files for cleanup
-      debug:
-        #  Normalize path to proper Windows format
-        msg: "{{ item.path | regex_replace('^([A-Za-z]):////', '//1:////') }}"
-      loop: "{{ files_to_delete.files }}"
-      when:
-        - files_to_delete.files is defined
-        - files_to_delete.files | length > 0
- 
+
+
     # =====================================================
     # DELETE FILES
     # =====================================================
@@ -100,7 +63,7 @@
       when:
         - filesystem_usage > filesystem_threshold
         - files_to_delete.files | length > 0
- 
+
     # =====================================================
     # SET CLEANUP STATUS
     # =====================================================
@@ -108,12 +71,12 @@
       set_fact:
         cleanup_performed: true
       when: delete_output is defined
- 
+
     - name: Set cleanup skipped
       set_fact:
         cleanup_performed: false
       when: cleanup_performed is not defined
- 
+
     # =====================================================
     # WAIT AFTER CLEANUP
     # =====================================================
@@ -121,7 +84,7 @@
       pause:
         seconds: 10
       when: cleanup_performed | bool
- 
+
     # =====================================================
     # RECHECK FILESYSTEM USAGE
     # =====================================================
@@ -141,39 +104,20 @@
       register: fs_after
       changed_when: false
       when: cleanup_performed | bool
- 
+
     - name: Set final filesystem usage
       set_fact:
         final_filesystem_usage: "{{ fs_after.stdout | trim | float }}"
       when: cleanup_performed | bool
- 
+
     - name: Set fallback filesystem usage
       set_fact:
         final_filesystem_usage: "{{ filesystem_usage }}"
       when: final_filesystem_usage is not defined
 
-# =====================================================
-# PREPARE FILE LIST  ADD THIS
-# =====================================================
-    - name: Prepare cleaned file list
-      set_fact:
-        cleaned_files: >-
-          {{
-            (
-              files_to_delete.files
-              | map(attribute='path')
-              | map('replace', '\\', '/')
-              | list
-              | join(' | ')
-            )
-            if (files_to_delete is defined and
-                files_to_delete.files is defined and
-                files_to_delete.files | length > 0)
-            else 'None'
-          }}
- 
+
     # =====================================================
-    # FINAL STATUS
+    # FINAL STATUS (SNOW SAFE FORMAT ✅)
     # =====================================================
     - name: Set final response
       set_fact:
@@ -187,28 +131,41 @@
           Current Filesystem utilization is {{ filesystem_usage }}%, within threshold {{ filesystem_threshold }}%.
           No action required.
           {% else %}
+
           {% if final_filesystem_usage | float < filesystem_threshold | float %}
           Filesystem Status: Issue Resolved After Remediation
           {% else %}
           Filesystem Status: Still High - Escalation Required
           {% endif %}
+
           Filesystem Usage Before Remediation: {{ filesystem_usage }}%
           Filesystem Usage After Remediation: {{ final_filesystem_usage }}%
-          Files Identified For Cleanup: {{ cleaned_files }}
+
+          Files Identified For Cleanup:
+          {% if files_to_delete is defined and files_to_delete.files | length > 0 %}
+          {% for file in files_to_delete.files %}
+          - {{ file.path }}
+          {% endfor %}
+          {% else %}
+          - None
+          {% endif %}
+
           Action Taken:
           {% if cleanup_performed | bool %}
           Cleanup executed for eligible files.
           {% else %}
           No eligible files found for cleanup.
           {% endif %}
+
           {% endif %}
- 
+
     - name: Display final response
       debug:
         msg:
           status_code: "{{ status_code }}"
           response_message: "{{ response_message }}"
- 
+
+
     # =====================================================
     # UPDATE IAUTOMATE
     # =====================================================
@@ -226,5 +183,3 @@
         body: "{{ lookup('template','status.json.j2') }}"
       delegate_to: localhost
       register: status_update_iautomate
- 
- 
