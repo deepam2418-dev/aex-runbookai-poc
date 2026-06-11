@@ -175,11 +175,12 @@
           Filesystem Usage Before Remediation: {{ filesystem_usage }}%
           Filesystem Usage After Remediation: {{ final_filesystem_usage }}%
           Files Identified For Cleanup: {{
-            files_to_delete.files
-            | map(attribute='path')
-            | map('replace', '\\\\', '/')
-            | list
-            | join(' | ')
+            files_to_delete.files | join(' | ') | replace('\\', '/')
+            # files_to_delete.files
+            # | map(attribute='path')
+            # | map('replace', '\\\\', '/')
+            # | list
+            # | join(' | ')
             if (files_to_delete is defined and files_to_delete.files | length > 0)
             else 'None'
           }}
@@ -200,18 +201,18 @@
     # =====================================================
     # UPDATE IAUTOMATE
     # =====================================================
-    - name: Update iautomate status
-      uri:
-        url: "http://10.224.11.147:8080/v2/runbooks/orgentityid/1/updaterunbookstatusv2"
-        validate_certs: no
-        user: "{{ iautomate_user }}"
-        password: "{{ iautomate_pass }}"
-        method: PUT
-        status_code: 200
-        return_content: yes
-        force_basic_auth: yes
-        body_format: json
-        body: "{{ lookup('template','status.json.j2') }}"
-      delegate_to: localhost
-      register: status_update_iautomate
+    # - name: Update iautomate status
+    #   uri:
+    #     url: "http://10.224.11.147:8080/v2/runbooks/orgentityid/1/updaterunbookstatusv2"
+    #     validate_certs: no
+    #     user: "{{ iautomate_user }}"
+    #     password: "{{ iautomate_pass }}"
+    #     method: PUT
+    #     status_code: 200
+    #     return_content: yes
+    #     force_basic_auth: yes
+    #     body_format: json
+    #     body: "{{ lookup('template','status.json.j2') }}"
+    #   delegate_to: localhost
+    #   register: status_update_iautomate
  
