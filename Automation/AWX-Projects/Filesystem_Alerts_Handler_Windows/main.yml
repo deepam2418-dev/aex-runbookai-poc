@@ -155,11 +155,15 @@
 
           {% endif %}
 
+    - name: Normalize reponse message
+      set_fact:
+        response_message: "{{ response_message | regex_replace('\\\\','/') }}"
+        
     - name: Display final response
       debug:
         msg:
           status_code: "{{ status_code }}"
-          response_message: "{{ response_message | regex_replace('\\\\','/') }}"
+          response_message: "{{ response_message }}"
 
     # =====================================================
     # UPDATE IAUTOMATE
