@@ -175,7 +175,7 @@
           Filesystem Usage Before Remediation: {{ filesystem_usage }}%
           Filesystem Usage After Remediation: {{ final_filesystem_usage }}%
           Files Identified For Cleanup: {{
-            files_to_delete.files | join(' | ') | replace('\\', '/')
+            files_to_delete.files| map(attribute='path') | map('replace', '\\', '/') | join(' | ') }}"
             if (files_to_delete is defined and files_to_delete.files | length > 0)
             else 'None'
           }}
