@@ -48,12 +48,7 @@
         recurse: yes
         file_type: file
       register: files_to_delete
-      # when: filesystem_usage > filesystem_threshold
-
-    - debug:
-        msg: "{{ files_to_delete.files | map(attribute='path') | join('|') | regex_replace('\\\\','/') }}"
-
-    - meta: end_play
+      when: filesystem_usage > filesystem_threshold
 
     # =====================================================
     # DELETE FILES
@@ -146,9 +141,7 @@
 
           Files Identified For Cleanup:
           {% if files_to_delete is defined and files_to_delete.files | length > 0 %}
-          {% for file in files_to_delete.files %}
-          - {{ file.path | regex_replace('\\\\', '\\\\\\\\') }}
-          {% endfor %}
+          - {{ files_to_delete.files | map(attribute='path') | join(' | ') | regex_replace('\\\\','/') }}
           {% else %}
           - None
           {% endif %}
