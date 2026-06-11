@@ -51,7 +51,8 @@
       when: filesystem_usage > filesystem_threshold
 
     - debug:
-        msg: files_to_delete
+        msg: 
+          var: files_to_delete
 
     - meta: end_play
 
