@@ -151,6 +151,26 @@
       set_fact:
         final_filesystem_usage: "{{ filesystem_usage }}"
       when: final_filesystem_usage is not defined
+
+# =====================================================
+# PREPARE FILE LIST  ADD THIS
+# =====================================================
+- name: Prepare cleaned file list
+  set_fact:
+    cleaned_files: >-
+      {{
+        (
+          files_to_delete.files
+          | map(attribute='path')
+          | map('replace', '\\', '/')
+          | list
+          | join(' | ')
+        )
+        if (files_to_delete is defined and
+            files_to_delete.files is defined and
+            files_to_delete.files | length > 0)
+        else 'None'
+      }}
  
     # =====================================================
     # FINAL STATUS
@@ -174,11 +194,7 @@
           {% endif %}
           Filesystem Usage Before Remediation: {{ filesystem_usage }}%
           Filesystem Usage After Remediation: {{ final_filesystem_usage }}%
-          Files Identified For Cleanup: {{
-            files_to_delete.files| map(attribute='path') | map('replace', '\\', '/') | join(' | ') }}"
-            if (files_to_delete is defined and files_to_delete.files | length > 0)
-            else 'None'
-          }}
+          Files Identified For Cleanup: {{ cleaned_files }}
           Action Taken:
           {% if cleanup_performed | bool %}
           Cleanup executed for eligible files.
