@@ -177,7 +177,7 @@
           Files Identified For Cleanup: {{
             files_to_delete.files
             | map(attribute='path')
-            | map('regex_replace','^([A-Za-z]):////','//1:////')
+            | map('replace', '\\\\', '/')
             | list
             | join(' | ')
             if (files_to_delete is defined and files_to_delete.files | length > 0)
