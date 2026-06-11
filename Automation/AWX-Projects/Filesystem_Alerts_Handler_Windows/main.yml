@@ -163,6 +163,7 @@
               files_to_delete.files
               | map(attribute='path')
               | map('replace', '\\', '/')
+              | map('regex_replace', '^([A-Za-z]):', '\\1\\:')
               | list
               | join(' | ')
             )
