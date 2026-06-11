@@ -7,8 +7,8 @@
   vars:
     filesystem_threshold: "{{ threshold | default(80) }}"
     allowed_cleanup_dirs:
-      - "C:\\temp\\fstest"
-      - "C:\\Windows\\Temp"
+      - "C://temp//fstest"
+      - "C://Windows//Temp"
     cleanup_pattern:
       - "*.bin"
       - "*.tmp"
@@ -82,7 +82,7 @@
     - name: Display files for cleanup
       debug:
         #  Normalize path to proper Windows format
-        msg: "{{ item.path | regex_replace('^([A-Za-z]):\\\\', '\\1:\\\\') }}"
+        msg: "{{ item.path | regex_replace('^([A-Za-z]):////', '//1:////') }}"
       loop: "{{ files_to_delete.files }}"
       when:
         - files_to_delete.files is defined
@@ -177,7 +177,7 @@
           Files Identified For Cleanup: {{
             files_to_delete.files
             | map(attribute='path')
-            | map('regex_replace','^([A-Za-z]):\\\\','\\1:\\\\')
+            | map('regex_replace','^([A-Za-z]):////','//1:////')
             | list
             | join(' | ')
             if (files_to_delete is defined and files_to_delete.files | length > 0)
