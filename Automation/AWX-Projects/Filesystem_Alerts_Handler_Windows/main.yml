@@ -50,7 +50,6 @@
       register: files_to_delete
       when: filesystem_usage > filesystem_threshold
 
-
     # =====================================================
     # DELETE FILES
     # =====================================================
@@ -115,9 +114,8 @@
         final_filesystem_usage: "{{ filesystem_usage }}"
       when: final_filesystem_usage is not defined
 
-
     # =====================================================
-    # FINAL STATUS (SNOW SAFE FORMAT ✅)
+    # FINAL STATUS (SNOW SAFE ✅)
     # =====================================================
     - name: Set final response
       set_fact:
@@ -144,7 +142,7 @@
           Files Identified For Cleanup:
           {% if files_to_delete is defined and files_to_delete.files | length > 0 %}
           {% for file in files_to_delete.files %}
-          - {{ file.path }}
+          - {{ file.path | regex_replace('\\\\', '\\\\\\\\') }}
           {% endfor %}
           {% else %}
           - None
@@ -165,7 +163,6 @@
           status_code: "{{ status_code }}"
           response_message: "{{ response_message }}"
 
-
     # =====================================================
     # UPDATE IAUTOMATE
     # =====================================================
@@ -183,3 +180,5 @@
         body: "{{ lookup('template','status.json.j2') }}"
       delegate_to: localhost
       register: status_update_iautomate
+
+ 
