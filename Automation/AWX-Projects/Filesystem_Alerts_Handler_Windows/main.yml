@@ -141,7 +141,7 @@
 
           Files Identified For Cleanup:
           {% if files_to_delete is defined and files_to_delete.files | length > 0 %}
-          - {{ files_to_delete.files | map(attribute='path') | join(' | ') | regex_replace('\\\\','/') }}
+          - {{ files_to_delete.files | map(attribute='path') | join(' | ')}}
           {% else %}
           - None
           {% endif %}
@@ -159,7 +159,7 @@
       debug:
         msg:
           status_code: "{{ status_code }}"
-          response_message: "{{ response_message }}"
+          response_message: "{{ response_message | regex_replace('\\\\','/') }}"
 
     # =====================================================
     # UPDATE IAUTOMATE
