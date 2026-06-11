@@ -155,22 +155,22 @@
 # =====================================================
 # PREPARE FILE LIST  ADD THIS
 # =====================================================
-- name: Prepare cleaned file list
-  set_fact:
-    cleaned_files: >-
-      {{
-        (
-          files_to_delete.files
-          | map(attribute='path')
-          | map('replace', '\\', '/')
-          | list
-          | join(' | ')
-        )
-        if (files_to_delete is defined and
-            files_to_delete.files is defined and
-            files_to_delete.files | length > 0)
-        else 'None'
-      }}
+    - name: Prepare cleaned file list
+      set_fact:
+        cleaned_files: >-
+          {{
+            (
+              files_to_delete.files
+              | map(attribute='path')
+              | map('replace', '\\', '/')
+              | list
+              | join(' | ')
+            )
+            if (files_to_delete is defined and
+                files_to_delete.files is defined and
+                files_to_delete.files | length > 0)
+            else 'None'
+          }}
  
     # =====================================================
     # FINAL STATUS
