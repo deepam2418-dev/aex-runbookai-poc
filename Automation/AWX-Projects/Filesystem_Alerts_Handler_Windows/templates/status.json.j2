@@ -2,5 +2,5 @@
   "TicketNumber": "{{ TicketNumber }}",
   "RbaInteractionId": "{{ tower_job_id }}",
   "RbaStatusCode": "{{ status_code }}",
-  "RbaStatusMessage": "{{ response_message }}"
+  "RbaStatusMessage": "{{ response_message | to_json }}"
 }
