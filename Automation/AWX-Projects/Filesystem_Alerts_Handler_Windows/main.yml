@@ -51,7 +51,7 @@
       # when: filesystem_usage > filesystem_threshold
 
     - debug:
-        msg: "{{ files_to_delete.files | map(attribute='path')}}"
+        msg: "{{ files_to_delete.files | map(attribute='path') | joint('|')}}"
 
     - meta: end_play
 
