@@ -48,7 +48,7 @@
         recurse: yes
         file_type: file
       register: files_to_delete
-      when: filesystem_usage > filesystem_threshold
+      # when: filesystem_usage > filesystem_threshold
 
     - debug:
         msg: 
