@@ -51,8 +51,7 @@
       # when: filesystem_usage > filesystem_threshold
 
     - debug:
-        msg: 
-          var: files_to_delete
+        msg: "{{ files_to_delete }}"
 
     - meta: end_play
 
