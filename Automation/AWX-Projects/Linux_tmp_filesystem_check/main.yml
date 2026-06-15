@@ -1,0 +1,36 @@
+---
+- name: Fetch /tmp filesystem information
+  hosts: "{{ target_host }}"
+  gather_facts: false
+
+  vars:
+    status_code: 0
+    response_message: ""
+
+  tasks:
+    - name: Run df -h on /tmp
+      ansible.builtin.shell: "df -h /tmp"
+      register: df_tmp_result
+      changed_when: false
+
+    - name: Set status and response message
+      ansible.builtin.set_fact:
+        status_code: "{{ 0 if df_tmp_result.rc == 0 else df_tmp_result.rc }}"
+        response_message: >-
+          {{ 'Successfully fetched /tmp filesystem information'
+             if df_tmp_result.rc == 0
+             else 'Failed to fetch /tmp filesystem information: ' ~ df_tmp_result.stderr }}
+
+    - name: Display /tmp filesystem information
+      ansible.builtin.debug:
+        msg:
+          - "Command: df -h /tmp"
+          - "Return code: {{ df_tmp_result.rc }}"
+          - "Stdout:"
+          - "{{ df_tmp_result.stdout_lines }}"
+
+    - name: Final result
+      ansible.builtin.debug:
+        msg:
+          status_code: "{{ status_code }}"
+          response_message: "{{ response_message }}"
