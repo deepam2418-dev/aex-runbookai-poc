@@ -1,12 +1,13 @@
-# =========================================================
-# PLAY - LINUX FILESYSTEM MONITORING & AUTO REMEDIATION
-# =========================================================
-- name: Linux Filesystem Monitoring and Auto Remediation
-  hosts: "{{ hostname }}"
-  gather_facts: no
+---
+- name: Filesystem_Alerts_Handler_Linux
+  hosts: "{{ target_host | default(hostname) }}"
+  gather_facts: false
   become: yes
 
   vars:
+    status_code: 0
+    response_message: "Automation execution is in progress."
+
     filesystem_threshold: "{{ threshold | default(80) }}"
 
     allowed_cleanup_dirs:
@@ -19,182 +20,211 @@
       - "*.md"
 
   tasks:
+    - name: Run pre execution lifecycle role
+      ansible.builtin.include_role:
+        name: Job_Pre_Execution
+      vars:
+        status_code: "{{ status_code }}"
+        response_message: "{{ response_message }}"
 
-    # =====================================================
-    # FETCH CURRENT FILESYSTEM USAGE
-    # =====================================================
-    - name: Fetch highest filesystem usage
-      shell: |
-        df -hP | awk 'NR>1 {gsub("%","",$5); print $5}' | sort -nr | head -1
-      register: fs_output
-      changed_when: false
+    - name: Filesystem alerts handler main block
+      block:
+        - name: Validate required parameters
+          ansible.builtin.assert:
+            that:
+              - (target_host is defined and (target_host | string | length > 0)) or
+                (hostname is defined and (hostname | string | length > 0))
+              - filesystem_threshold is defined
+              - (filesystem_threshold | float) > 0
+              - (filesystem_threshold | float) < 100
+            fail_msg: >-
+              Required parameters are missing or invalid.
+              Ensure target_host/hostname and filesystem_threshold (0 < threshold < 100)
+              are correctly set.
+            success_msg: "Required parameters validated successfully."
 
-    - name: Set filesystem fact
-      set_fact:
-        filesystem_usage: "{{ fs_output.stdout | trim | float }}"
+        - name: Update job status - parameter validation completed
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: >-
+              Parameter validation completed successfully.
+              Filesystem alerts handler is in progress with threshold
+              {{ filesystem_threshold }}%.
 
-    # =====================================================
-    # INITIALIZE VARIABLES
-    # =====================================================
-    - name: Initialize variables
-      set_fact:
-        cleanup_performed: false
-        final_filesystem_usage: "{{ filesystem_usage }}"
-        files_to_delete_list: []
-        file_details: "None"
-        action_details: ""
+        - name: Fetch highest filesystem usage
+          ansible.builtin.shell: |
+            df -hP | awk 'NR>1 {gsub("%","",$5); print $5}' | sort -nr | head -1
+          register: fs_output
+          changed_when: false
 
-    # =====================================================
-    # DISPLAY FILESYSTEM USAGE
-    # =====================================================
-    - name: Display filesystem usage
-      debug:
-        msg: "Current Filesystem Usage: {{ filesystem_usage }}%"
+        - name: Set filesystem usage fact
+          ansible.builtin.set_fact:
+            filesystem_usage: "{{ fs_output.stdout | trim | float }}"
 
-    # =====================================================
-    # FIND FILES ELIGIBLE FOR CLEANUP
-    # =====================================================
-    - name: Find files eligible for cleanup
-      find:
-        paths: "{{ allowed_cleanup_dirs }}"
-        patterns: "{{ cleanup_pattern }}"
-        recurse: yes
-        file_type: file
-      register: files_to_delete
-      when: filesystem_usage > filesystem_threshold
+        - name: Update job status - filesystem usage fetched
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: >-
+              Current filesystem usage is {{ filesystem_usage }}%.
+              Threshold is {{ filesystem_threshold }}%.
+              Evaluating need for cleanup.
 
-    # =====================================================
-    # PREPARE FILE DETAILS
-    # =====================================================
-    - name: Prepare file details
-      set_fact:
-        file_details: >-
-          {{
-            (files_to_delete.files | map(attribute='path') | list) | join(' | ')
-            if (files_to_delete.files | length > 0)
-            else 'None'
-          }}
-        files_to_delete_list: "{{ files_to_delete.files | map(attribute='path') | list }}"
-      when: filesystem_usage > filesystem_threshold
+        - name: Find files eligible for cleanup
+          ansible.builtin.find:
+            paths: "{{ allowed_cleanup_dirs }}"
+            patterns: "{{ cleanup_pattern }}"
+            recurse: yes
+            file_type: file
+          register: files_to_delete
+          when: filesystem_usage > filesystem_threshold | float
 
-    # =====================================================
-    # DISPLAY FILES FOR CLEANUP
-    # =====================================================
-    - name: Display files for cleanup
-      debug:
-        msg: "{{ item }}"
-      loop: "{{ files_to_delete_list }}"
-      when: files_to_delete_list | length > 0
+        - name: Initialize intermediate variables
+          ansible.builtin.set_fact:
+            cleanup_performed: false
+            final_filesystem_usage: "{{ filesystem_usage }}"
+            files_to_delete_list: []
+            file_details: "None"
+            action_details: ""
 
-    # =====================================================
-    # DELETE FILES
-    # =====================================================
-    - name: Delete eligible files
-      file:
-        path: "{{ item }}"
-        state: absent
-      loop: "{{ files_to_delete_list }}"
-      register: delete_output
-      when: files_to_delete_list | length > 0
+        - name: Prepare file details
+          ansible.builtin.set_fact:
+            file_details: >-
+              {{
+                (files_to_delete.files | map(attribute='path') | list) | join(' | ')
+                if (files_to_delete is defined and files_to_delete.files | length > 0)
+                else 'None'
+              }}
+            files_to_delete_list: >-
+              {{
+                files_to_delete.files | map(attribute='path') | list
+                if (files_to_delete is defined and files_to_delete.files | length > 0)
+                else []
+              }}
+          when: filesystem_usage > filesystem_threshold | float
 
-    # =====================================================
-    # SET CLEANUP STATUS
-    # =====================================================
-    - name: Mark cleanup performed
-      set_fact:
-        cleanup_performed: true
-      when: delete_output is defined
+        - name: Update job status - files identified for cleanup
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: >-
+              Filesystem usage is {{ filesystem_usage }}%, above threshold
+              {{ filesystem_threshold }}%. Files identified for cleanup:
+              {{ file_details }}.
 
-    - name: Prepare action details
-      set_fact:
-        action_details: >-
-          {% if files_to_delete_list | length > 0 %}
-          Deleted files: {{ files_to_delete_list | join(', ') }}
-          {% else %}
-          No eligible files found for cleanup
-          {% endif %}
+        - name: Display files for cleanup
+          ansible.builtin.debug:
+            msg: "{{ item }}"
+          loop: "{{ files_to_delete_list }}"
+          when: files_to_delete_list | length > 0
 
-    # =====================================================
-    # WAIT AFTER CLEANUP
-    # =====================================================
-    - name: Wait after cleanup
-      pause:
-        seconds: 5
-      when: cleanup_performed | bool
+        - name: Delete eligible files
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop: "{{ files_to_delete_list }}"
+          register: delete_output
+          when: files_to_delete_list | length > 0
 
-    # =====================================================
-    # RECHECK FILESYSTEM USAGE
-    # =====================================================
-    - name: Recheck filesystem usage
-      shell: |
-        df -hP | awk 'NR>1 {gsub("%","",$5); print $5}' | sort -nr | head -1
-      register: fs_after
-      changed_when: false
-      when: cleanup_performed | bool
+        - name: Mark cleanup performed
+          ansible.builtin.set_fact:
+            cleanup_performed: true
+          when: delete_output is defined
 
-    - name: Set final filesystem usage
-      set_fact:
-        final_filesystem_usage: "{{ fs_after.stdout | trim | float }}"
-      when: cleanup_performed | bool
+        - name: Prepare action details
+          ansible.builtin.set_fact:
+            action_details: >-
+              {% if files_to_delete_list | length > 0 %}
+              Deleted files: {{ files_to_delete_list | join(', ') }}
+              {% else %}
+              No eligible files found for cleanup
+              {% endif %}
 
-    # =====================================================
-    # FINAL STATUS & RESPONSE
-    # =====================================================
-    - name: Set final response
-      set_fact:
-        status_code: >-
-          {{
-            1 if (final_filesystem_usage | float) < (filesystem_threshold | float)
-            else 2
-          }}
+        - name: Update job status - cleanup step completed
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: >-
+              Cleanup step completed. {{ action_details }}
 
-        response_message: |
-          {% if filesystem_usage | float < filesystem_threshold | float %}
-          Current Filesystem utilization is {{ filesystem_usage }}%, which is within threshold {{ filesystem_threshold }}%.
-          No action required. Closing the ticket.
+        - name: Wait after cleanup
+          ansible.builtin.pause:
+            seconds: 5
+          when: cleanup_performed | bool
 
-          {% else %}
+        - name: Recheck filesystem usage
+          ansible.builtin.shell: |
+            df -hP | awk 'NR>1 {gsub("%","",$5); print $5}' | sort -nr | head -1
+          register: fs_after
+          changed_when: false
+          when: cleanup_performed | bool
 
-          {% if final_filesystem_usage | float < filesystem_threshold | float %}
-             Filesystem Status: Issue Resolved After Remediation
-          {% else %}
-             Filesystem Status: Still High - Escalation Required
-          {% endif %}
+        - name: Set final filesystem usage
+          ansible.builtin.set_fact:
+            final_filesystem_usage: "{{ fs_after.stdout | trim | float }}"
+          when: cleanup_performed | bool
 
-             Filesystem Usage Before Remediation: {{ filesystem_usage }}%
+        - name: Set final response
+          ansible.builtin.set_fact:
+            status_code: >-
+              {{
+                1
+                if (filesystem_usage | float <= filesystem_threshold | float)
+                else (
+                  1 if (final_filesystem_usage | float) < (filesystem_threshold | float)
+                  else 2
+                )
+              }}
+            response_message: |-
+              {% if filesystem_usage | float <= filesystem_threshold | float %}
+              Current Filesystem utilization is {{ filesystem_usage }}%, which is within
+              threshold {{ filesystem_threshold }}%. No action required. Closing the ticket.
 
-             Filesystem Usage After Remediation: {{ final_filesystem_usage }}%
+              {% else %}
 
-             Files Identified For Cleanup: {{ file_details }}
+              {% if final_filesystem_usage | float < filesystem_threshold | float %}
+              Filesystem Status: Issue Resolved After Remediation
+              {% else %}
+              Filesystem Status: Still High - Escalation Required
+              {% endif %}
 
+              Filesystem Usage Before Remediation: {{ filesystem_usage }}%
+              Filesystem Usage After Remediation: {{ final_filesystem_usage }}%
+              Files Identified For Cleanup: {{ file_details }}
               Action Taken: {{ action_details }}
- 
-          {% endif %}
+              {% endif %}
 
-    # =====================================================
-    # DISPLAY FINAL RESULT
-    # =====================================================
-    - name: Display final response
-      debug:
-        msg:
-          status_code: "{{ status_code }}"
-          response_message: "{{ response_message }}"
+        - name: Update job status - final response
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
 
-    # =====================================================
-    # UPDATE IAUTOMATE STATUS
-    # =====================================================
-    - name: Update iautomate status
-      uri:
-        url: "http://10.224.11.147:8080/v2/runbooks/orgentityid/1/updaterunbookstatusv2"
-        method: PUT
-        user: "{{ iautomate_user }}"
-        password: "{{ iautomate_pass }}"
-        force_basic_auth: yes
-        validate_certs: no
-        status_code: 200
-        return_content: yes
-        body_format: json
-        body: "{{ lookup('template', 'status.json.j2') }}"
-      delegate_to: localhost
-      become: no
-      register: status_update_iautomate
+      rescue:
+        - name: Set failed and transferred status
+          ansible.builtin.set_fact:
+            status_code: -1
+            response_message: >-
+              Automation execution was not successful. The issue is being
+              transferred for manual review. Error details: {{ fs_output.stderr | default('N/A') }}
+
+        - name: Update job status - execution not successful and transferred
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
+
+      always:
+        - name: Run post execution lifecycle role
+          ansible.builtin.include_role:
+            name: Job_Post_Execution
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
