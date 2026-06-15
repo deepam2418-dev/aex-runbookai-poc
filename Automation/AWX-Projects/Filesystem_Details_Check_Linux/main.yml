@@ -1,0 +1,88 @@
+---
+- name: Filesystem_Details_Check_Linux
+  hosts: "{{ target_host }}"
+  gather_facts: false
+
+  vars:
+    # Mandatory status variables
+    status_code: 0
+    response_message: "Automation execution is in progress."
+
+  tasks:
+    - name: Run pre execution lifecycle role
+      ansible.builtin.include_role:
+        name: Job_Pre_Execution
+      vars:
+        status_code: "{{ status_code }}"
+        response_message: "{{ response_message }}"
+
+    - name: Main automation block
+      block:
+        - name: Validate required parameters
+          ansible.builtin.assert:
+            that:
+              - target_host is defined
+              - (target_host | string | length) > 0
+            fail_msg: "Required parameter 'target_host' is missing or empty."
+            success_msg: "Required parameters validated successfully."
+
+        - name: Update job status - parameter validation completed
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: "Parameter validation completed successfully. Filesystem usage collection is in progress."
+
+        - name: Collect filesystem usage (df -h)
+          ansible.builtin.command: df -h
+          register: filesystem_df
+          changed_when: false
+
+        - name: Update job status - filesystem usage collected
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: "Filesystem usage details collected successfully. Preparing final status."
+
+        - name: Display filesystem usage output
+          ansible.builtin.debug:
+            msg: "{{ filesystem_df.stdout_lines }}"
+
+        - name: Set successful resolution status
+          ansible.builtin.set_fact:
+            status_code: 1
+            response_message: "Automation completed successfully. Filesystem usage details were collected."
+
+        - name: Update job status - successfully resolved
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
+
+      rescue:
+        - name: Set failed and transferred status
+          ansible.builtin.set_fact:
+            status_code: -1
+            response_message: >-
+              Automation execution was not successful. The issue is being transferred
+              for manual review. Error details: {{
+                (filesystem_df.stderr if (filesystem_df is defined and filesystem_df.stderr is defined)
+                else 'See task failure logs for more details.')
+              }}
+
+        - name: Update job status - execution not successful and transferred
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
+
+      always:
+        - name: Run post execution lifecycle role
+          ansible.builtin.include_role:
+            name: Job_Post_Execution
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
