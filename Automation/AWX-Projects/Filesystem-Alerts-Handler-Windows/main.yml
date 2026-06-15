@@ -1,0 +1,294 @@
+# =========================================================
+# PLAY - WINDOWS FILESYSTEM MONITORING & AUTO REMEDIATION
+# =========================================================
+- name: Windows Filesystem Monitoring and Auto Remediation
+  hosts: "{{ hostname }}"
+  gather_facts: no
+
+  vars:
+    filesystem_threshold: "{{ threshold | default(80) }}"
+
+    allowed_cleanup_dirs:
+      - "C:\\temp\\fstest"
+      - "C:\\Windows\\Temp"
+
+    cleanup_pattern:
+      - "*.bin"
+      - "*.tmp"
+      - "*.md"
+
+  tasks:
+
+    # =====================================================
+    # FETCH CURRENT FILESYSTEM USAGE
+    # =====================================================
+    - name: Fetch highest filesystem usage
+      win_shell: |
+        $drives = Get-WmiObject Win32_LogicalDisk -Filter "DriveType=3"
+
+        $maxUsage = 0
+
+        foreach ($drive in $drives) {
+
+          if ($drive.Size -gt 0) {
+
+            $usage = [math]::Round(
+              ((($drive.Size - $drive.FreeSpace) / $drive.Size) * 100), 2
+            )
+
+            if ($usage -gt $maxUsage) {
+              $maxUsage = $usage
+            }
+          }
+        }
+
+        Write-Output $maxUsage
+      register: fs_output
+      changed_when: false
+
+    # =====================================================
+    # SET FILESYSTEM FACT
+    # =====================================================
+    - name: Set filesystem fact
+      set_fact:
+        filesystem_usage: "{{ fs_output.stdout | trim | float }}"
+
+    # =====================================================
+    # DISPLAY FILESYSTEM USAGE
+    # =====================================================
+    - name: Display filesystem usage
+      debug:
+        msg: "Current Filesystem Usage: {{ filesystem_usage }}%"
+
+    # =====================================================
+    # GET FILESYSTEMS EXCEEDING THRESHOLD
+    # =====================================================
+    - name: Get filesystems exceeding threshold
+      win_shell: |
+        $threshold = {{ filesystem_threshold }}
+
+        Get-WmiObject Win32_LogicalDisk -Filter "DriveType=3" |
+        ForEach-Object {
+
+          if ($_.Size -gt 0) {
+
+            $usage = [math]::Round(
+              (((($_.Size - $_.FreeSpace) / $_.Size) * 100)), 2
+            )
+
+            if ($usage -gt $threshold) {
+              Write-Output "$($_.DeviceID) $usage%"
+            }
+          }
+        }
+      register: exceeded_fs
+      changed_when: false
+      when:
+        - filesystem_usage > filesystem_threshold
+
+    # =====================================================
+    # DISPLAY EXCEEDED FILESYSTEMS
+    # =====================================================
+    - name: Display exceeded filesystems
+      debug:
+        var: exceeded_fs.stdout_lines
+      when:
+        - filesystem_usage > filesystem_threshold
+
+    # =====================================================
+    # FIND FILES FOR CLEANUP
+    # =====================================================
+    - name: Find files eligible for cleanup
+      win_find:
+        paths: "{{ allowed_cleanup_dirs }}"
+        patterns: "{{ cleanup_pattern }}"
+        recurse: yes
+        file_type: file
+      register: files_to_delete
+      when:
+        - filesystem_usage > filesystem_threshold
+
+    # =====================================================
+    # DISPLAY FILES FOR CLEANUP
+    # =====================================================
+    - name: Display files for cleanup
+      debug:
+        msg: "{{ item.path }}"
+      loop: "{{ files_to_delete.files }}"
+      when:
+        - files_to_delete.files is defined
+        - files_to_delete.files | length > 0
+
+    # =====================================================
+    # DELETE FILES
+    # =====================================================
+    - name: Delete eligible files
+      win_file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ files_to_delete.files }}"
+      loop_control:
+        label: "{{ item.path }}"
+      register: delete_output
+      when:
+        - filesystem_usage > filesystem_threshold
+        - files_to_delete.files | length > 0
+
+    # =====================================================
+    # SET CLEANUP STATUS
+    # =====================================================
+    - name: Set cleanup performed
+      set_fact:
+        cleanup_performed: true
+      when:
+        - delete_output is defined
+
+    - name: Set cleanup skipped
+      set_fact:
+        cleanup_performed: false
+      when:
+        - cleanup_performed is not defined
+
+    # =====================================================
+    # WAIT AFTER CLEANUP
+    # =====================================================
+    - name: Wait after cleanup
+      pause:
+        seconds: 10
+      when:
+        - cleanup_performed | bool
+
+    # =====================================================
+    # RECHECK FILESYSTEM USAGE
+    # =====================================================
+    - name: Recheck filesystem usage
+      win_shell: |
+        $drives = Get-WmiObject Win32_LogicalDisk -Filter "DriveType=3"
+
+        $maxUsage = 0
+
+        foreach ($drive in $drives) {
+
+          if ($drive.Size -gt 0) {
+
+            $usage = [math]::Round(
+              ((($drive.Size - $drive.FreeSpace) / $drive.Size) * 100), 2
+            )
+
+            if ($usage -gt $maxUsage) {
+              $maxUsage = $usage
+            }
+          }
+        }
+
+        Write-Output $maxUsage
+      register: fs_after
+      changed_when: false
+      when:
+        - cleanup_performed | bool
+
+    # =====================================================
+    # SET FINAL FILESYSTEM USAGE
+    # =====================================================
+    - name: Set final filesystem usage
+      set_fact:
+        final_filesystem_usage: >-
+          {{
+            fs_after.stdout | trim | float
+          }}
+      when:
+        - cleanup_performed | bool
+
+    # =====================================================
+    # FALLBACK IF NO CLEANUP
+    # =====================================================
+    - name: Set fallback filesystem usage
+      set_fact:
+        final_filesystem_usage: "{{ filesystem_usage }}"
+      when:
+        - final_filesystem_usage is not defined
+
+    # =====================================================
+    # FINAL STATUS & RESPONSE
+    # =====================================================
+    - name: Set final response
+      set_fact:
+
+        status_code: >-
+          {{
+            1
+            if (final_filesystem_usage | float) <
+               (filesystem_threshold | float)
+            else 2
+          }}
+
+        response_message: >-
+          {{
+            (
+              'Filesystem usage on host ' ~ hostname ~
+              ' was detected at ' ~
+              (filesystem_usage | string) ~
+              '%, which is below the configured threshold of ' ~
+              (filesystem_threshold | string) ~
+              '%. No remediation was required.'
+            )
+
+            if (filesystem_usage | float) < (filesystem_threshold | float)
+
+            else
+
+            (
+              'Filesystem usage on host ' ~ hostname ~
+              ' was initially detected at ' ~
+              (filesystem_usage | string) ~
+              '%, exceeding the configured threshold of ' ~
+              (filesystem_threshold | string) ~
+              '%. ' ~
+
+              (
+                'Cleanup was performed in allowed directories (' ~
+                allowed_cleanup_dirs | join(', ') ~ '). '
+                if cleanup_performed | bool
+                else
+                'No eligible files were found for cleanup. '
+              ) ~
+
+              'Post-remediation filesystem utilization is ' ~
+              (final_filesystem_usage | string) ~
+              '%. ' ~
+
+              (
+                'Filesystem usage is now within acceptable limits. Marking the ticket as resolved.'
+                if (final_filesystem_usage | float) <
+                  (filesystem_threshold | float)
+                else
+                'Filesystem usage remains high after remediation. Escalating the ticket.'
+              )
+            )
+          }}
+    # =====================================================
+    # DISPLAY FINAL RESULT
+    # =====================================================
+    - name: Display final response
+      debug:
+        msg:
+          status_code: "{{ status_code }}"
+          response_message: "{{ response_message }}"
+
+    # =====================================================
+    # UPDATE IAUTOMATE STATUS
+    # =====================================================
+    - name: Update iautomate url about status
+      uri:
+        url: "http://10.224.11.147:8080/v2/runbooks/orgentityid/1/updaterunbookstatusv2"
+        validate_certs: no
+        user: "iautomate@syneoshealth.com"
+        password: "Yy9%HyZW"
+        method: PUT
+        status_code: 200
+        return_content: yes
+        force_basic_auth: yes
+        body_format: json
+        body: "{{ lookup('template','status.json.j2') }}"
+      delegate_to: localhost
+      register: status_update_iautomate

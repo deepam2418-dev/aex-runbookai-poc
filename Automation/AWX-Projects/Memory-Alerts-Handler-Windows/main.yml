@@ -1,0 +1,240 @@
+# =========================================================
+# PLAY - WINDOWS MEMORY MONITORING & AUTO REMEDIATION
+# =========================================================
+- name: Windows Memory Monitoring and Auto Remediation
+  hosts: "{{ hostname }}"
+  gather_facts: no
+
+  vars:
+    memory_threshold: "{{ threshold | default(80) }}"
+
+    # =====================================================
+    # PROCESSES ALLOWED FOR REMEDIATION
+    # =====================================================
+    remediation_process_names:
+      - chrome
+      - notepad
+
+  tasks:
+
+    # =====================================================
+    # FETCH CURRENT MEMORY USAGE
+    # =====================================================
+    - name: Fetch current memory usage
+      win_shell: |
+        $os = Get-CimInstance Win32_OperatingSystem
+
+        $used = $os.TotalVisibleMemorySize - $os.FreePhysicalMemory
+
+        $percent = ($used / $os.TotalVisibleMemorySize) * 100
+
+        [math]::Round($percent, 2)
+      register: memory_output
+      changed_when: false
+
+    # =====================================================
+    # SET MEMORY FACT
+    # =====================================================
+    - name: Set memory usage fact
+      set_fact:
+        memory_usage: "{{ memory_output.stdout | trim | float }}"
+
+    # =====================================================
+    # DISPLAY CURRENT MEMORY USAGE
+    # =====================================================
+    - name: Display memory usage
+      debug:
+        msg: "Current Memory Usage: {{ memory_usage }}%"
+
+    # =====================================================
+    # CHECK IF THRESHOLD EXCEEDED
+    # =====================================================
+    - name: Get top memory consuming processes
+      win_shell: |
+        Get-Process |
+        Sort-Object WS -Descending |
+        Select-Object -First 10 Name, Id,
+        @{Name="MemoryMB";Expression={[math]::Round($_.WS/1MB,2)}} |
+        ConvertTo-Json
+      register: top_processes
+      changed_when: false
+      when:
+        - memory_usage > memory_threshold
+
+    # =====================================================
+    # DISPLAY TOP PROCESSES
+    # =====================================================
+    - name: Display top processes
+      debug:
+        var: top_processes.stdout
+      when:
+        - memory_usage > memory_threshold
+
+    # =====================================================
+    # TERMINATE ALLOWED PROCESSES
+    # =====================================================
+    - name: Kill allowed remediation processes
+      win_shell: |
+        $processes = @(
+        {% for process in remediation_process_names %}
+          "{{ process }}"{% if not loop.last %},{% endif %}
+        {% endfor %}
+        )
+
+        foreach ($proc in $processes) {
+
+          Get-Process -Name $proc -ErrorAction SilentlyContinue |
+          Stop-Process -Force -ErrorAction SilentlyContinue
+        }
+
+        Write-Output "Remediation completed"
+      register: remediation_output
+      changed_when: true
+      when:
+        - memory_usage > memory_threshold
+
+    # =====================================================
+    # SET REMEDIATION STATUS
+    # =====================================================
+    - name: Set remediation performed
+      set_fact:
+        remediation_performed: true
+      when:
+        - remediation_output is defined
+
+    - name: Set remediation skipped
+      set_fact:
+        remediation_performed: false
+      when:
+        - remediation_performed is not defined
+
+    # =====================================================
+    # WAIT AFTER REMEDIATION
+    # =====================================================
+    - name: Wait after remediation
+      pause:
+        seconds: 10
+      when:
+        - remediation_performed | bool
+
+    # =====================================================
+    # RECHECK MEMORY USAGE
+    # =====================================================
+    - name: Recheck memory usage
+      win_shell: |
+        $os = Get-CimInstance Win32_OperatingSystem
+
+        $used = $os.TotalVisibleMemorySize - $os.FreePhysicalMemory
+
+        $percent = ($used / $os.TotalVisibleMemorySize) * 100
+
+        [math]::Round($percent, 2)
+      register: memory_after
+      changed_when: false
+      when:
+        - remediation_performed | bool
+
+    # =====================================================
+    # SET FINAL MEMORY USAGE
+    # =====================================================
+    - name: Set final memory usage
+      set_fact:
+        final_memory_usage: "{{ memory_after.stdout | trim | float }}"
+      when:
+        - remediation_performed | bool
+
+    # =====================================================
+    # FALLBACK IF NO REMEDIATION
+    # =====================================================
+    - name: Set fallback final memory usage
+      set_fact:
+        final_memory_usage: "{{ memory_usage }}"
+      when:
+        - final_memory_usage is not defined
+
+    # =====================================================
+    # FINAL STATUS & RESPONSE
+    # =====================================================
+    - name: Set final response
+      set_fact:
+
+        status_code: >-
+          {{
+            1
+            if (final_memory_usage | float) <
+               (memory_threshold | float)
+            else 2
+          }}
+
+        response_message: >-
+          {{
+            (
+              'Memory usage on host ' ~ hostname ~
+              ' was detected at ' ~
+              (memory_usage | string) ~
+              '%, which is below the configured threshold of ' ~
+              (memory_threshold | string) ~
+              '%. No remediation was required.'
+            )
+
+            if (memory_usage | float) <
+               (memory_threshold | float)
+
+            else
+
+            (
+              'Memory usage on host ' ~ hostname ~
+              ' was initially detected at ' ~
+              (memory_usage | string) ~
+              '%, exceeding the configured threshold of ' ~
+              (memory_threshold | string) ~
+              '%. ' ~
+
+              (
+                'Remediation was performed by terminating allowed processes (' ~
+                remediation_process_names | join(', ') ~ '). '
+                if remediation_performed | bool
+                else
+                'No remediation actions were performed. '
+              ) ~
+
+              'Post-remediation memory utilization is ' ~
+              (final_memory_usage | string) ~
+              '%. ' ~
+
+              (
+                'Memory utilization is now within acceptable limits. Marking the ticket as resolved.'
+                if (final_memory_usage | float) <
+                   (memory_threshold | float)
+                else
+                'Memory utilization remains high after remediation. Escalating the ticket.'
+              )
+            )
+          }}
+
+    # =====================================================
+    # DISPLAY FINAL RESULT
+    # =====================================================
+    - name: Display final response
+      debug:
+        msg:
+          status_code: "{{ status_code }}"
+          response_message: "{{ response_message }}"
+
+    # =====================================================
+    # UPDATE IAUTOMATE STATUS
+    # =====================================================
+    - name: Update iautomate url about status
+      uri:
+        url: "http://10.224.11.147:8080/v2/runbooks/orgentityid/1/updaterunbookstatusv2"
+        validate_certs: no
+        user: "iautomate@syneoshealth.com"
+        password: "Yy9%HyZW"
+        method: PUT
+        status_code: 200
+        return_content: yes
+        force_basic_auth: yes
+        body_format: json
+        body: "{{ lookup('template','status.json.j2') }}"
+      delegate_to: localhost
+      register: status_update_iautomate

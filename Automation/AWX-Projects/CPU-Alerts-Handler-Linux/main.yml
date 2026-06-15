@@ -1,0 +1,192 @@
+# =========================================================
+# PLAY 1 - CPU MONITORING & AUTO REMEDIATION
+# =========================================================
+- name: CPU Monitoring and Auto Remediation
+  hosts: "{{ hostname }}"
+  gather_facts: no
+  become: yes
+
+  vars:
+    cpu_threshold: "{{ threshold | default(70) }}"
+
+    # Approved processes for auto remediation
+    process_list:
+      # - dataprocess
+      - testprocess
+
+  tasks:
+
+    # =====================================================
+    # GET HIGH CPU PROCESSES
+    # =====================================================
+    - name: Get matching high CPU processes
+      shell: |
+        ps -eo pid,comm,%cpu --no-headers | awk '$3 > {{ cpu_threshold }} {print $1, $2, $3}'
+      register: high_cpu
+      changed_when: false
+
+    - name: Display high CPU processes
+      debug:
+        msg: "{{ high_cpu.stdout_lines }}"
+
+    # =====================================================
+    # FILTER ONLY APPROVED PROCESSES
+    # =====================================================
+    - name: Filter only approved process names
+      set_fact:
+        filtered_processes: >-
+          {{
+            high_cpu.stdout_lines
+            | map('split')
+            | selectattr('1', 'in', process_list)
+            | list
+          }}
+
+    - name: Display filtered processes
+      debug:
+        msg: "{{ filtered_processes }}"
+
+    # =====================================================
+    # EXTRACT PROCESS DETAILS
+    # =====================================================
+    - name: Extract process PIDs
+      set_fact:
+        filtered_pids: "{{ filtered_processes | map('first') | list }}"
+
+    - name: Extract process names
+      set_fact:
+        filtered_names: "{{ filtered_processes | map(attribute='1') | list }}"
+
+    - name: Display filtered process IDs
+      debug:
+        msg: "{{ filtered_pids }}"    
+    # =====================================================
+    # KILL FILTERED HIGH CPU PROCESSES
+    # =====================================================
+    - name: Kill filtered high CPU processes
+      shell: "kill -9 {{ item }}"
+      loop: "{{ filtered_pids }}"
+      register: kill_results
+      ignore_errors: yes
+      when:
+        - filtered_pids | length > 0
+
+    - name: Set remediation status
+      set_fact:
+        process_killed: true
+      when:
+        - filtered_pids | length > 0
+
+    - name: Set remediation skipped
+      set_fact:
+        process_killed: false
+      when:
+        - filtered_pids | length == 0
+
+    # =====================================================
+    # WAIT FOR CPU STABILIZATION
+    # =====================================================
+    - name: Wait for CPU stabilization
+      pause:
+        seconds: 10
+      when:
+        - process_killed | bool
+
+    # =====================================================
+    # RECHECK OVERALL CPU USAGE
+    # =====================================================
+    - name: Get overall CPU usage
+      shell: "top -bn1 | grep 'Cpu(s)' | awk '{print 100 - $8}'"
+      register: cpu_usage
+      changed_when: false
+
+    - name: Set final CPU value
+      set_fact:
+        final_cpu_value: "{{ cpu_usage.stdout | trim | float | round(2) }}"
+
+    - name: Print CPU usage
+      debug:
+        msg: "Current CPU Usage: {{ final_cpu_value }}%"
+
+    # =====================================================
+    # SET STATUS CODE
+    # =====================================================
+    - name: Set final status code
+      set_fact:
+        status_code: >-
+          {{
+            1 if (final_cpu_value | float) < (cpu_threshold | float)
+            else 2
+          }}
+
+    # =====================================================
+    # SET RESPONSE MESSAGE
+    # =====================================================
+    - name: Set response message
+      set_fact:
+        response_message: >-
+          {{
+            (
+              'CPU usage on host ' ~ hostname ~
+              ' exceeded the configured threshold of ' ~
+              (cpu_threshold | string) ~ '%. '
+            )
+            ~
+
+            (
+              'Approved high CPU processes identified: ' ~
+              (filtered_names | unique | join(', ')) ~ '. '
+              if filtered_names | length > 0
+              else
+              'No approved high CPU processes were identified for remediation. '
+            )
+            ~
+
+            (
+              'Automation terminated the matching processes with PIDs: ' ~
+              (filtered_pids | join(', ')) ~ '. '
+              if filtered_pids | length > 0
+              else
+              ''
+            )
+            ~
+
+            (
+              'Post-remediation CPU utilization is ' ~
+              (final_cpu_value | string) ~
+              '%. CPU utilization returned to normal levels. Marking the ticket as resolved.'
+              if (final_cpu_value | float) < (cpu_threshold | float)
+              else
+              'Post-remediation CPU utilization remains at ' ~
+              (final_cpu_value | string) ~
+              '%, which is still above threshold. Escalating the ticket for further investigation.'
+            )
+          }}
+
+    # =====================================================
+    # DISPLAY FINAL RESPONSE
+    # =====================================================
+    - name: Display final response
+      debug:
+        msg:
+          status_code: "{{ status_code }}"
+          response_message: "{{ response_message }}"
+
+    # =====================================================
+    # UPDATE IAUTOMATE STATUS
+    # =====================================================
+    - name: Update iautomate url about status
+      uri:
+        url: "http://10.224.11.147:8080/v2/runbooks/orgentityid/1/updaterunbookstatusv2"
+        validate_certs: no
+        user: "iautomate@syneoshealth.com"
+        password: "Yy9%HyZW"
+        method: PUT
+        status_code: 200
+        return_content: yes
+        force_basic_auth: yes
+        body_format: json
+        body: "{{ lookup('template','status.json.j2') }}"
+      delegate_to: localhost
+      become: no
+      register: status_update_iautomate
