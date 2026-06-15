@@ -1,177 +1,174 @@
---- 
 # =========================================================
-# PLAY - WINDOWS MEMORY MONITORING & AUTO REMEDIATION
+# PLAY - LINUX FILESYSTEM MONITORING & AUTO REMEDIATION
 # =========================================================
-- name: Windows Memory Monitoring and Auto Remediation
+- name: Linux Filesystem Monitoring and Auto Remediation
   hosts: "{{ hostname }}"
   gather_facts: no
+  become: yes
 
   vars:
-    memory_threshold: "{{ threshold | default(80) }}"
+    filesystem_threshold: "{{ threshold | default(80) }}"
 
-    remediation_process_names:
-      - chrome
-      - notepad
+    allowed_cleanup_dirs:
+      - "/tmp/fstest"
+      - "/tmp"
+
+    cleanup_pattern:
+      - "*.bin"
+      - "*.tmp"
+      - "*.md"
 
   tasks:
 
     # =====================================================
-    # FETCH CURRENT MEMORY USAGE
+    # FETCH CURRENT FILESYSTEM USAGE
     # =====================================================
-    - name: Fetch current memory usage
-      win_shell: |
-        $os = Get-CimInstance Win32_OperatingSystem
-        $used = $os.TotalVisibleMemorySize - $os.FreePhysicalMemory
-        $percent = ($used / $os.TotalVisibleMemorySize) * 100
-        [math]::Round($percent, 2)
-      register: memory_output
+    - name: Fetch highest filesystem usage
+      shell: |
+        df -hP | awk 'NR>1 {gsub("%","",$5); print $5}' | sort -nr | head -1
+      register: fs_output
       changed_when: false
 
-    - name: Set memory usage fact
+    - name: Set filesystem fact
       set_fact:
-        memory_usage: "{{ memory_output.stdout | trim | float }}"
+        filesystem_usage: "{{ fs_output.stdout | trim | float }}"
 
-    - name: Display memory usage
+    # =====================================================
+    # INITIALIZE VARIABLES
+    # =====================================================
+    - name: Initialize variables
+      set_fact:
+        cleanup_performed: false
+        final_filesystem_usage: "{{ filesystem_usage }}"
+        files_to_delete_list: []
+        file_details: "None"
+        action_details: ""
+
+    # =====================================================
+    # DISPLAY FILESYSTEM USAGE
+    # =====================================================
+    - name: Display filesystem usage
       debug:
-        msg: "Current Memory Usage: {{ memory_usage }}%"
+        msg: "Current Filesystem Usage: {{ filesystem_usage }}%"
 
     # =====================================================
-    # GET HIGH MEMORY PROCESSES
+    # FIND FILES ELIGIBLE FOR CLEANUP
     # =====================================================
-    - name: Get top memory consuming processes
-      win_shell: |
-        Get-Process |
-        Sort-Object WS -Descending |
-        Select-Object -First 10 Name, Id,
-        @{Name="MemoryMB";Expression={[math]::Round($_.WS/1MB,2)}} |
-        ConvertTo-Json
-      register: top_processes
-      changed_when: false
-      when:
-        - memory_usage > memory_threshold
+    - name: Find files eligible for cleanup
+      find:
+        paths: "{{ allowed_cleanup_dirs }}"
+        patterns: "{{ cleanup_pattern }}"
+        recurse: yes
+        file_type: file
+      register: files_to_delete
+      when: filesystem_usage > filesystem_threshold
 
-    - name: Display top processes
+    # =====================================================
+    # PREPARE FILE DETAILS
+    # =====================================================
+    - name: Prepare file details
+      set_fact:
+        file_details: >-
+          {{
+            (files_to_delete.files | map(attribute='path') | list) | join(' | ')
+            if (files_to_delete.files | length > 0)
+            else 'None'
+          }}
+        files_to_delete_list: "{{ files_to_delete.files | map(attribute='path') | list }}"
+      when: filesystem_usage > filesystem_threshold
+
+    # =====================================================
+    # DISPLAY FILES FOR CLEANUP
+    # =====================================================
+    - name: Display files for cleanup
       debug:
-        var: top_processes.stdout
-      when:
-        - memory_usage > memory_threshold
+        msg: "{{ item }}"
+      loop: "{{ files_to_delete_list }}"
+      when: files_to_delete_list | length > 0
 
     # =====================================================
-    # TERMINATE ALLOWED PROCESSES
+    # DELETE FILES
     # =====================================================
-    - name: Kill allowed remediation processes
-      win_shell: |
-        $processes = @(
-        {% for process in remediation_process_names %}
-          "{{ process }}"{% if not loop.last %},{% endif %}
-        {% endfor %}
-        )
-
-        foreach ($proc in $processes) {
-          Get-Process -Name $proc -ErrorAction SilentlyContinue |
-          Stop-Process -Force -ErrorAction SilentlyContinue
-        }
-
-        Write-Output "Remediation completed"
-      register: remediation_output
-      changed_when: true
-      when:
-        - memory_usage > memory_threshold
+    - name: Delete eligible files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ files_to_delete_list }}"
+      register: delete_output
+      when: files_to_delete_list | length > 0
 
     # =====================================================
-    # SET REMEDIATION STATUS
+    # SET CLEANUP STATUS
     # =====================================================
-    - name: Set remediation performed
+    - name: Mark cleanup performed
       set_fact:
-        remediation_performed: true
-      when:
-        - remediation_output is defined
+        cleanup_performed: true
+      when: delete_output is defined
 
-    - name: Set remediation skipped
+    - name: Prepare action details
       set_fact:
-        remediation_performed: false
-      when:
-        - remediation_performed is not defined
+        action_details: >-
+          {% if files_to_delete_list | length > 0 %}
+          Deleted files: {{ files_to_delete_list | join(', ') }}
+          {% else %}
+          No eligible files found for cleanup
+          {% endif %}
 
     # =====================================================
-    # WAIT AFTER REMEDIATION
+    # WAIT AFTER CLEANUP
     # =====================================================
-    - name: Wait after remediation
+    - name: Wait after cleanup
       pause:
-        seconds: 10
-      when:
-        - remediation_performed | bool
+        seconds: 5
+      when: cleanup_performed | bool
 
     # =====================================================
-    # RECHECK MEMORY
+    # RECHECK FILESYSTEM USAGE
     # =====================================================
-    - name: Recheck memory usage
-      win_shell: |
-        $os = Get-CimInstance Win32_OperatingSystem
-        $used = $os.TotalVisibleMemorySize - $os.FreePhysicalMemory
-        $percent = ($used / $os.TotalVisibleMemorySize) * 100
-        [math]::Round($percent, 2)
-      register: memory_after
+    - name: Recheck filesystem usage
+      shell: |
+        df -hP | awk 'NR>1 {gsub("%","",$5); print $5}' | sort -nr | head -1
+      register: fs_after
       changed_when: false
-      when:
-        - remediation_performed | bool
+      when: cleanup_performed | bool
 
-    - name: Set final memory usage
+    - name: Set final filesystem usage
       set_fact:
-        final_memory_usage: "{{ memory_after.stdout | trim | float }}"
-      when:
-        - remediation_performed | bool
-
-    - name: Set fallback final memory usage
-      set_fact:
-        final_memory_usage: "{{ memory_usage }}"
-      when:
-        - final_memory_usage is not defined
+        final_filesystem_usage: "{{ fs_after.stdout | trim | float }}"
+      when: cleanup_performed | bool
 
     # =====================================================
-    # FINAL STATUS & RESPONSE (ONLY UPDATED)
+    # FINAL STATUS & RESPONSE
     # =====================================================
     - name: Set final response
       set_fact:
-
         status_code: >-
           {{
-            1
-            if (final_memory_usage | float) <
-               (memory_threshold | float)
+            1 if (final_filesystem_usage | float) < (filesystem_threshold | float)
             else 2
           }}
 
         response_message: |
-          {% if memory_usage | float < memory_threshold | float %}
-          Current Memory utilization is {{ memory_usage }}%. Which is within the defined threshold {{ memory_threshold }}%. No action required, Hence closing the ticket.
+          {% if filesystem_usage | float < filesystem_threshold | float %}
+          Current Filesystem utilization is {{ filesystem_usage }}%, which is within threshold {{ filesystem_threshold }}%.
+          No action required. Closing the ticket.
+
           {% else %}
 
-          {% if final_memory_usage | float < memory_threshold | float %}
-             Memory Status: Issue Resolved After Remediation
+          {% if final_filesystem_usage | float < filesystem_threshold | float %}
+             Filesystem Status: Issue Resolved After Remediation
           {% else %}
-             Memory Status: Still High - Escalation Required
+             Filesystem Status: Still High - Escalation Required
           {% endif %}
 
-             Memory Utilization Before Remediation: {{ memory_usage }}%
+             Filesystem Usage Before Remediation: {{ filesystem_usage }}%
 
-             Memory Utilization After Remediation: {{ final_memory_usage }}%
+             Filesystem Usage After Remediation: {{ final_filesystem_usage }}%
 
-             High Memory Processes: {{ top_processes.stdout | default('None') }}
+             Files Identified For Cleanup: {{ file_details }}
 
-             Approved Processes: {{ remediation_process_names | join(', ') if remediation_performed | bool else 'None' }}
-
-             Non-Approved Processes: None
-
-             Process IDs (PIDs): None
-
-             Action Taken:
-          {% if remediation_performed | bool %}
-             Remediation performed by terminating allowed processes.
-          {% else %}
-             No remediation actions were performed.
-          {% endif %}
-
+              Action Taken: {{ action_details }}
+ 
           {% endif %}
 
     # =====================================================
@@ -186,17 +183,18 @@
     # =====================================================
     # UPDATE IAUTOMATE STATUS
     # =====================================================
-    - name: Update iautomate url about status
+    - name: Update iautomate status
       uri:
         url: "http://10.224.11.147:8080/v2/runbooks/orgentityid/1/updaterunbookstatusv2"
-        validate_certs: no
+        method: PUT
         user: "{{ iautomate_user }}"
         password: "{{ iautomate_pass }}"
-        method: PUT
+        force_basic_auth: yes
+        validate_certs: no
         status_code: 200
         return_content: yes
-        force_basic_auth: yes
         body_format: json
-        body: "{{ lookup('template','status.json.j2') }}"
+        body: "{{ lookup('template', 'status.json.j2') }}"
       delegate_to: localhost
+      become: no
       register: status_update_iautomate
