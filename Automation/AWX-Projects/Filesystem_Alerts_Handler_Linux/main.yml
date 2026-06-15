@@ -1,230 +1,202 @@
----
-- name: Filesystem_Alerts_Handler_Linux
-  hosts: "{{ target_host | default(hostname) }}"
-  gather_facts: false
-  become: yes
+--- 
+# =========================================================
+# PLAY - WINDOWS MEMORY MONITORING & AUTO REMEDIATION
+# =========================================================
+- name: Windows Memory Monitoring and Auto Remediation
+  hosts: "{{ hostname }}"
+  gather_facts: no
 
   vars:
-    status_code: 0
-    response_message: "Automation execution is in progress."
+    memory_threshold: "{{ threshold | default(80) }}"
 
-    filesystem_threshold: "{{ threshold | default(80) }}"
-
-    allowed_cleanup_dirs:
-      - "/tmp/fstest"
-      - "/tmp"
-
-    cleanup_pattern:
-      - "*.bin"
-      - "*.tmp"
-      - "*.md"
+    remediation_process_names:
+      - chrome
+      - notepad
 
   tasks:
-    - name: Run pre execution lifecycle role
-      ansible.builtin.include_role:
-        name: Job_Pre_Execution
-      vars:
-        status_code: "{{ status_code }}"
-        response_message: "{{ response_message }}"
 
-    - name: Filesystem alerts handler main block
-      block:
-        - name: Validate required parameters
-          ansible.builtin.assert:
-            that:
-              - (target_host is defined and (target_host | string | length > 0)) or
-                (hostname is defined and (hostname | string | length > 0))
-              - filesystem_threshold is defined
-              - (filesystem_threshold | float) > 0
-              - (filesystem_threshold | float) < 100
-            fail_msg: >-
-              Required parameters are missing or invalid.
-              Ensure target_host/hostname and filesystem_threshold (0 < threshold < 100)
-              are correctly set.
-            success_msg: "Required parameters validated successfully."
+    # =====================================================
+    # FETCH CURRENT MEMORY USAGE
+    # =====================================================
+    - name: Fetch current memory usage
+      win_shell: |
+        $os = Get-CimInstance Win32_OperatingSystem
+        $used = $os.TotalVisibleMemorySize - $os.FreePhysicalMemory
+        $percent = ($used / $os.TotalVisibleMemorySize) * 100
+        [math]::Round($percent, 2)
+      register: memory_output
+      changed_when: false
 
-        - name: Update job status - parameter validation completed
-          ansible.builtin.include_role:
-            name: Job_Updates
-          vars:
-            status_code: 0
-            response_message: >-
-              Parameter validation completed successfully.
-              Filesystem alerts handler is in progress with threshold
-              {{ filesystem_threshold }}%.
+    - name: Set memory usage fact
+      set_fact:
+        memory_usage: "{{ memory_output.stdout | trim | float }}"
 
-        - name: Fetch highest filesystem usage
-          ansible.builtin.shell: |
-            df -hP | awk 'NR>1 {gsub("%","",$5); print $5}' | sort -nr | head -1
-          register: fs_output
-          changed_when: false
+    - name: Display memory usage
+      debug:
+        msg: "Current Memory Usage: {{ memory_usage }}%"
 
-        - name: Set filesystem usage fact
-          ansible.builtin.set_fact:
-            filesystem_usage: "{{ fs_output.stdout | trim | float }}"
+    # =====================================================
+    # GET HIGH MEMORY PROCESSES
+    # =====================================================
+    - name: Get top memory consuming processes
+      win_shell: |
+        Get-Process |
+        Sort-Object WS -Descending |
+        Select-Object -First 10 Name, Id,
+        @{Name="MemoryMB";Expression={[math]::Round($_.WS/1MB,2)}} |
+        ConvertTo-Json
+      register: top_processes
+      changed_when: false
+      when:
+        - memory_usage > memory_threshold
 
-        - name: Update job status - filesystem usage fetched
-          ansible.builtin.include_role:
-            name: Job_Updates
-          vars:
-            status_code: 0
-            response_message: >-
-              Current filesystem usage is {{ filesystem_usage }}%.
-              Threshold is {{ filesystem_threshold }}%.
-              Evaluating need for cleanup.
+    - name: Display top processes
+      debug:
+        var: top_processes.stdout
+      when:
+        - memory_usage > memory_threshold
 
-        - name: Find files eligible for cleanup
-          ansible.builtin.find:
-            paths: "{{ allowed_cleanup_dirs }}"
-            patterns: "{{ cleanup_pattern }}"
-            recurse: yes
-            file_type: file
-          register: files_to_delete
-          when: filesystem_usage > filesystem_threshold | float
+    # =====================================================
+    # TERMINATE ALLOWED PROCESSES
+    # =====================================================
+    - name: Kill allowed remediation processes
+      win_shell: |
+        $processes = @(
+        {% for process in remediation_process_names %}
+          "{{ process }}"{% if not loop.last %},{% endif %}
+        {% endfor %}
+        )
 
-        - name: Initialize intermediate variables
-          ansible.builtin.set_fact:
-            cleanup_performed: false
-            final_filesystem_usage: "{{ filesystem_usage }}"
-            files_to_delete_list: []
-            file_details: "None"
-            action_details: ""
+        foreach ($proc in $processes) {
+          Get-Process -Name $proc -ErrorAction SilentlyContinue |
+          Stop-Process -Force -ErrorAction SilentlyContinue
+        }
 
-        - name: Prepare file details
-          ansible.builtin.set_fact:
-            file_details: >-
-              {{
-                (files_to_delete.files | map(attribute='path') | list) | join(' | ')
-                if (files_to_delete is defined and files_to_delete.files | length > 0)
-                else 'None'
-              }}
-            files_to_delete_list: >-
-              {{
-                files_to_delete.files | map(attribute='path') | list
-                if (files_to_delete is defined and files_to_delete.files | length > 0)
-                else []
-              }}
-          when: filesystem_usage > filesystem_threshold | float
+        Write-Output "Remediation completed"
+      register: remediation_output
+      changed_when: true
+      when:
+        - memory_usage > memory_threshold
 
-        - name: Update job status - files identified for cleanup
-          ansible.builtin.include_role:
-            name: Job_Updates
-          vars:
-            status_code: 0
-            response_message: >-
-              Filesystem usage is {{ filesystem_usage }}%, above threshold
-              {{ filesystem_threshold }}%. Files identified for cleanup:
-              {{ file_details }}.
+    # =====================================================
+    # SET REMEDIATION STATUS
+    # =====================================================
+    - name: Set remediation performed
+      set_fact:
+        remediation_performed: true
+      when:
+        - remediation_output is defined
 
-        - name: Display files for cleanup
-          ansible.builtin.debug:
-            msg: "{{ item }}"
-          loop: "{{ files_to_delete_list }}"
-          when: files_to_delete_list | length > 0
+    - name: Set remediation skipped
+      set_fact:
+        remediation_performed: false
+      when:
+        - remediation_performed is not defined
 
-        - name: Delete eligible files
-          ansible.builtin.file:
-            path: "{{ item }}"
-            state: absent
-          loop: "{{ files_to_delete_list }}"
-          register: delete_output
-          when: files_to_delete_list | length > 0
+    # =====================================================
+    # WAIT AFTER REMEDIATION
+    # =====================================================
+    - name: Wait after remediation
+      pause:
+        seconds: 10
+      when:
+        - remediation_performed | bool
 
-        - name: Mark cleanup performed
-          ansible.builtin.set_fact:
-            cleanup_performed: true
-          when: delete_output is defined
+    # =====================================================
+    # RECHECK MEMORY
+    # =====================================================
+    - name: Recheck memory usage
+      win_shell: |
+        $os = Get-CimInstance Win32_OperatingSystem
+        $used = $os.TotalVisibleMemorySize - $os.FreePhysicalMemory
+        $percent = ($used / $os.TotalVisibleMemorySize) * 100
+        [math]::Round($percent, 2)
+      register: memory_after
+      changed_when: false
+      when:
+        - remediation_performed | bool
 
-        - name: Prepare action details
-          ansible.builtin.set_fact:
-            action_details: >-
-              {% if files_to_delete_list | length > 0 %}
-              Deleted files: {{ files_to_delete_list | join(', ') }}
-              {% else %}
-              No eligible files found for cleanup
-              {% endif %}
+    - name: Set final memory usage
+      set_fact:
+        final_memory_usage: "{{ memory_after.stdout | trim | float }}"
+      when:
+        - remediation_performed | bool
 
-        - name: Update job status - cleanup step completed
-          ansible.builtin.include_role:
-            name: Job_Updates
-          vars:
-            status_code: 0
-            response_message: >-
-              Cleanup step completed. {{ action_details }}
+    - name: Set fallback final memory usage
+      set_fact:
+        final_memory_usage: "{{ memory_usage }}"
+      when:
+        - final_memory_usage is not defined
 
-        - name: Wait after cleanup
-          ansible.builtin.pause:
-            seconds: 5
-          when: cleanup_performed | bool
+    # =====================================================
+    # FINAL STATUS & RESPONSE (ONLY UPDATED)
+    # =====================================================
+    - name: Set final response
+      set_fact:
 
-        - name: Recheck filesystem usage
-          ansible.builtin.shell: |
-            df -hP | awk 'NR>1 {gsub("%","",$5); print $5}' | sort -nr | head -1
-          register: fs_after
-          changed_when: false
-          when: cleanup_performed | bool
+        status_code: >-
+          {{
+            1
+            if (final_memory_usage | float) <
+               (memory_threshold | float)
+            else 2
+          }}
 
-        - name: Set final filesystem usage
-          ansible.builtin.set_fact:
-            final_filesystem_usage: "{{ fs_after.stdout | trim | float }}"
-          when: cleanup_performed | bool
+        response_message: |
+          {% if memory_usage | float < memory_threshold | float %}
+          Current Memory utilization is {{ memory_usage }}%. Which is within the defined threshold {{ memory_threshold }}%. No action required, Hence closing the ticket.
+          {% else %}
 
-        - name: Set final response
-          ansible.builtin.set_fact:
-            status_code: >-
-              {{
-                1
-                if (filesystem_usage | float <= filesystem_threshold | float)
-                else (
-                  1 if (final_filesystem_usage | float) < (filesystem_threshold | float)
-                  else 2
-                )
-              }}
-            response_message: |-
-              {% if filesystem_usage | float <= filesystem_threshold | float %}
-              Current Filesystem utilization is {{ filesystem_usage }}%, which is within
-              threshold {{ filesystem_threshold }}%. No action required. Closing the ticket.
+          {% if final_memory_usage | float < memory_threshold | float %}
+             Memory Status: Issue Resolved After Remediation
+          {% else %}
+             Memory Status: Still High - Escalation Required
+          {% endif %}
 
-              {% else %}
+             Memory Utilization Before Remediation: {{ memory_usage }}%
 
-              {% if final_filesystem_usage | float < filesystem_threshold | float %}
-              Filesystem Status: Issue Resolved After Remediation
-              {% else %}
-              Filesystem Status: Still High - Escalation Required
-              {% endif %}
+             Memory Utilization After Remediation: {{ final_memory_usage }}%
 
-              Filesystem Usage Before Remediation: {{ filesystem_usage }}%
-              Filesystem Usage After Remediation: {{ final_filesystem_usage }}%
-              Files Identified For Cleanup: {{ file_details }}
-              Action Taken: {{ action_details }}
-              {% endif %}
+             High Memory Processes: {{ top_processes.stdout | default('None') }}
 
-        - name: Update job status - final response
-          ansible.builtin.include_role:
-            name: Job_Updates
-          vars:
-            status_code: "{{ status_code }}"
-            response_message: "{{ response_message }}"
+             Approved Processes: {{ remediation_process_names | join(', ') if remediation_performed | bool else 'None' }}
 
-      rescue:
-        - name: Set failed and transferred status
-          ansible.builtin.set_fact:
-            status_code: -1
-            response_message: >-
-              Automation execution was not successful. The issue is being
-              transferred for manual review. Error details: {{ fs_output.stderr | default('N/A') }}
+             Non-Approved Processes: None
 
-        - name: Update job status - execution not successful and transferred
-          ansible.builtin.include_role:
-            name: Job_Updates
-          vars:
-            status_code: "{{ status_code }}"
-            response_message: "{{ response_message }}"
+             Process IDs (PIDs): None
 
-      always:
-        - name: Run post execution lifecycle role
-          ansible.builtin.include_role:
-            name: Job_Post_Execution
-          vars:
-            status_code: "{{ status_code }}"
-            response_message: "{{ response_message }}"
+             Action Taken:
+          {% if remediation_performed | bool %}
+             Remediation performed by terminating allowed processes.
+          {% else %}
+             No remediation actions were performed.
+          {% endif %}
+
+          {% endif %}
+
+    # =====================================================
+    # DISPLAY FINAL RESULT
+    # =====================================================
+    - name: Display final response
+      debug:
+        msg:
+          status_code: "{{ status_code }}"
+          response_message: "{{ response_message }}"
+
+    # =====================================================
+    # UPDATE IAUTOMATE STATUS
+    # =====================================================
+    - name: Update iautomate url about status
+      uri:
+        url: "http://10.224.11.147:8080/v2/runbooks/orgentityid/1/updaterunbookstatusv2"
+        validate_certs: no
+        user: "{{ iautomate_user }}"
+        password: "{{ iautomate_pass }}"
+        method: PUT
+        status_code: 200
+        return_content: yes
+        force_basic_auth: yes
+        body_format: json
+        body: "{{ lookup('template','status.json.j2') }}"
+      delegate_to: localhost
+      register: status_update_iautomate
