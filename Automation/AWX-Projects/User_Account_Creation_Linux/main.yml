@@ -7,8 +7,8 @@
     status_code: 0
     response_message: "Automation execution is in progress."
 
-    user_name: "{{ user_name | default('testuser') }}"
-    user_shell: "{{ user_shell | default('/bin/bash') }}"
+    ia_user_name: "{{ user_name | default('testuser') }}"
+    ia_user_shell: "{{ user_shell | default('/bin/bash') }}"
 
   tasks:
     - name: Run pre execution lifecycle role
@@ -26,8 +26,8 @@
             that:
               - target_host is defined
               - (target_host | string) | length > 0
-              - user_name is defined
-              - (user_name | string) | length > 0
+              - ia_user_name is defined
+              - (ia_user_name | string) | length > 0
             fail_msg: "Required parameters target_host or user_name are missing or invalid."
             success_msg: "Required parameters validated successfully."
 
@@ -40,8 +40,8 @@
 
         - name: Ensure user exists on Linux host (idempotent ensure-present)
           ansible.builtin.user:
-            name: "{{ user_name }}"
-            shell: "{{ user_shell }}"
+            name: "{{ ia_user_name }}"
+            shell: "{{ ia_user_shell }}"
             state: present
           register: user_ensure_result
 
@@ -51,14 +51,14 @@
           vars:
             status_code: 0
             response_message: >-
-              User ensure-present step completed for '{{ user_name }}'.
+              User ensure-present step completed for '{{ ia_user_name }}'.
               Automation is still in progress.
 
         - name: Set successful resolution status
           ansible.builtin.set_fact:
             status_code: 1
             response_message: >-
-              Automation completed successfully. User '{{ user_name }}'
+              Automation completed successfully. User '{{ ia_user_name }}'
               exists on the target Linux host and the issue has been resolved.
 
         - name: Update job status - successfully resolved
@@ -77,7 +77,7 @@
           ansible.builtin.set_fact:
             status_code: -1
             response_message: >-
-              Automation execution was not successful for user '{{ user_name }}'.
+              Automation execution was not successful for user '{{ ia_user_name }}'.
               The issue is being transferred for manual review.
 
         - name: Update job status - execution not successful and transferred
