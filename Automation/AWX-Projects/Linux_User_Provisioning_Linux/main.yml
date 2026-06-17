@@ -59,8 +59,8 @@
           ansible.builtin.set_fact:
             status_code: 1
             response_message: >
-              Automation completed successfully. Linux user '{{ linux_username }}' is ensured present
-              on host '{{ target_host }}'.
+              Automation completed successfully. Linux user {{ linux_username }} is ensured present
+              on host {{ target_host }}
 
         - name: Update job status - successfully resolved
           ansible.builtin.include_role:
