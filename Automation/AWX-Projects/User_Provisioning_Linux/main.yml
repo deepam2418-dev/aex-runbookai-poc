@@ -1,0 +1,92 @@
+---
+- name: User_Provisioning_Linux
+  hosts: "{{ target_host }}"
+  gather_facts: false
+
+  vars:
+    status_code: 0
+    response_message: "Automation execution is in progress."
+
+    # Dynamic user name (must be provided at runtime)
+    linux_username: "{{ linux_username }}"
+
+    # Static defaults (can be parameterized later if needed)
+    linux_shell: "/bin/bash"
+    linux_create_home: yes
+
+  tasks:
+    - name: Run pre execution lifecycle role
+      ansible.builtin.include_role:
+        name: Job_Pre_Execution
+
+    - name: Main automation block - provision Linux user
+      block:
+
+        - name: Validate required parameters
+          ansible.builtin.assert:
+            that:
+              - target_host is defined
+              - target_host | string | length > 0
+              - linux_username is defined
+              - linux_username | string | length > 0
+            fail_msg: "Required parameters target_host or linux_username are missing or empty."
+            success_msg: "Required parameters validated successfully."
+
+        - name: Update job status - parameter validation completed
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: "Parameter validation completed successfully. Automation is in progress."
+
+        - name: Ensure Linux user exists
+          ansible.builtin.user:
+            name: "{{ linux_username }}"
+            shell: "{{ linux_shell }}"
+            create_home: "{{ linux_create_home }}"
+            state: present
+          register: user_result
+
+        - name: Update job status - user provisioning step completed
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: >
+              Linux user {{ linux_username }} provisioning step completed on host {{ target_host }}.
+              Changed={{ user_result.changed }}.
+
+        - name: Set successful resolution status
+          ansible.builtin.set_fact:
+            status_code: 1
+            response_message: >-
+              Automation completed successfully. The Linux user {{ linux_username }} exists on host
+              {{ target_host }}. Changed={{ user_result.changed }}.
+
+        - name: Update job status - successfully resolved
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
+
+      rescue:
+        - name: Set failed and transferred status
+          ansible.builtin.set_fact:
+            status_code: -1
+            response_message: >-
+              Automation execution was not successful while provisioning Linux user {{ linux_username | default("<unknown>") }}
+              on host {{ target_host | default("<unknown>") }}. The issue is being transferred for
+              manual review. Check previous task output for details.
+
+        - name: Update job status - execution not successful and transferred
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
+
+      always:
+        - name: Run post execution lifecycle role
+          ansible.builtin.include_role:
+            name: Job_Post_Execution
