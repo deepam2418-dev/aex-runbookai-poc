@@ -1,1 +1,0 @@
-{"JobId": "{{ job_id }}","TicketNumber": "{{ snow_incident_id }}",{% if tower_job_id is defined %}{% set interaction_id = tower_job_id %}"RbaInteractionId": "{{ interaction_id }}",{% else %}"RbaInteractionId": "{{ interaction_id }}",{% endif %}"RbaStatusCode": "{{ status_codes }}","RbaStatusMessage": "{ output : {{iautomate_success}} }"}
