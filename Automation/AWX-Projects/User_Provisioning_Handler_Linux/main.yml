@@ -35,8 +35,8 @@
           ansible.builtin.user:
             name: "{{ user_name }}"
             state: present
-            create_home: "{{ create_home | default(true) }}"
-            shell: "{{ user_shell | default('/bin/bash') }}"
+            create_home: true
+            shell: "/bin/bash"
           register: user_result
 
         - name: Update job status - user provisioning step completed
