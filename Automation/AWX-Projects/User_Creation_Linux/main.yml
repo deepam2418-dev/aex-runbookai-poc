@@ -86,6 +86,3 @@
         - name: Run post execution lifecycle role
           ansible.builtin.include_role:
             name: Job_Post_Execution
-          vars:
-            status_code: "{{ status_code }}"
-            response_message: "{{ response_message }}"
