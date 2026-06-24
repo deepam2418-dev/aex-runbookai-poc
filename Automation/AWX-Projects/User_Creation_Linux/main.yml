@@ -1,0 +1,91 @@
+---
+- name: User_Creation_Linux
+  hosts: "{{ target_host }}"
+  gather_facts: false
+
+  vars:
+    status_code: 0
+    response_message: "Automation execution is in progress."
+
+  tasks:
+    - name: Run pre execution lifecycle role
+      ansible.builtin.include_role:
+        name: Job_Pre_Execution
+      vars:
+        status_code: "{{ status_code }}"
+        response_message: "{{ response_message }}"
+
+    - name: Main automation block - manage Linux user
+      block:
+        - name: Validate required parameters
+          ansible.builtin.assert:
+            that:
+              - target_host is defined
+              - target_host | string | length > 0
+              - username is defined
+              - username | string | length > 0
+            fail_msg: "Required parameters target_host and username are missing or empty."
+            success_msg: "Required parameters validated successfully."
+
+        - name: Update job status - parameter validation completed
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: "Parameter validation completed successfully. Automation is in progress."
+
+        - name: Manage Linux user (create/update/remove)
+          ansible.builtin.user:
+            name: "{{ username }}"
+            uid: "{{ uid | default(omit) }}"
+            group: "{{ group | default(omit) }}"
+            shell: "{{ shell | default(omit) }}"
+            home: "{{ home | default(omit) }}"
+            state: "{{ state | default('present') }}"
+            create_home: true
+          register: user_result
+
+        - name: Update job status - user management step completed
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: >-
+              User management step completed. User {{ username }} state is {{ state | default('present') }}.
+
+        - name: Set successful resolution status
+          ansible.builtin.set_fact:
+            status_code: 1
+            response_message: >-
+              Automation completed successfully. User {{ username }} is now
+              {{ state | default('present') }} on host {{ target_host }}.
+
+        - name: Update job status - successfully resolved
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
+
+      rescue:
+        - name: Set failed and transferred status
+          ansible.builtin.set_fact:
+            status_code: -1
+            response_message: >-
+              Automation execution was not successful while managing user {{ username | default('unknown') }}.
+              The issue is being transferred for manual review.
+
+        - name: Update job status - execution not successful and transferred
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
+
+      always:
+        - name: Run post execution lifecycle role
+          ansible.builtin.include_role:
+            name: Job_Post_Execution
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
