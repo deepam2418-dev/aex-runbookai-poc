@@ -10,7 +10,7 @@
     cpu_threshold: "{{ threshold | default(80) }}"
 
     process_list:
-      - powershell
+      - cmd
 
   tasks:
 
