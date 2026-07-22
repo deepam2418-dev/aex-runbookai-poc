@@ -84,11 +84,7 @@
     # =====================================================
     - name: Get process IDs
       raw: >
-        powershell "
-        Get-Process |
-        Where-Object { $_.ProcessName -match '{{ process_list | join("|") }}' } |
-        Select-Object -ExpandProperty Id
-        "
+        powershell -Command "Get-Process | Where-Object { $_.ProcessName -match '^({{ process_list | join("|") }})$' } | Select-Object -ExpandProperty Id"
       register: pid_output
       when:
         - filtered_processes | length > 0
