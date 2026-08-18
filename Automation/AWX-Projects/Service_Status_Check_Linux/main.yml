@@ -1,0 +1,80 @@
+---
+- name: Service_Status_Check_Linux
+  hosts: "{{ target_host }}"
+  gather_facts: false
+
+  vars:
+    status_code: 0
+    response_message: "Automation execution is in progress."
+
+  tasks:
+    - name: Run pre execution lifecycle role
+      ansible.builtin.include_role:
+        name: Job_Pre_Execution
+
+    - name: Main automation block
+      block:
+        - name: Validate required parameters
+          ansible.builtin.assert:
+            that:
+              - target_host is defined
+              - target_host | string | length > 0
+              - service_name is defined
+              - service_name | string | length > 0
+            fail_msg: "Required parameter(s) target_host or service_name is missing."
+            success_msg: "Required parameters validated successfully."
+
+        - name: Update job status - parameter validation completed
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: "Parameter validation completed successfully. Automation is in progress."
+
+        - name: Check service status on Linux server
+          ansible.builtin.systemd:
+            name: "{{ service_name }}"
+            enabled: no
+          register: service_status
+
+        - name: Update job status - service status checked
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: "Service status checked. Automation is still in progress."
+
+        - name: Set successful resolution status if service is active
+          ansible.builtin.set_fact:
+            status_code: "{{ 1 if service_status.status == 'running' else -1 }}"
+            response_message: >-
+              {% if service_status.status == 'running' %}
+                Service {{ service_name }} is running on {{ target_host }}.
+              {% else %}
+                Service {{ service_name }} is NOT running on {{ target_host }}. The issue is being transferred for manual review.
+              {% endif %}
+
+        - name: Update job status - final state set
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
+
+      rescue:
+        - name: Set failed and transferred status due to error during execution
+          ansible.builtin.set_fact:
+            status_code: -1
+            response_message: "Automation execution was not successful. The issue is being transferred for manual review."
+
+        - name: Update job status - execution not successful and transferred
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
+
+      always:
+        - name: Run post execution lifecycle role
+          ansible.builtin.include_role:
+            name: Job_Post_Execution
