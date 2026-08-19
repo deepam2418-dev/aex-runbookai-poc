@@ -33,7 +33,7 @@
             response_message: "Parameter validation completed successfully. Automation is in progress."
 
         - name: Check Windows service status
-          win_service_info:
+          win_service:
             name: "{{ service_name }}"
           register: svc_status
 
@@ -48,7 +48,7 @@
           ansible.builtin.set_fact:
             status_code: 1
             response_message: >-
-              {% if svc_status.exists %}
+              {% if svc_status.exists is defined and svc_status.exists %}
                 Service '{{ service_name }}' exists. Current state is '{{ svc_status.state }}'.
                 Automation completed successfully. The issue has been resolved.
               {% else %}
