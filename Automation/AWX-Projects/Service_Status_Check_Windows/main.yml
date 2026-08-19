@@ -1,0 +1,82 @@
+---
+- name: Service_Status_Check_Windows
+  hosts: "{{ target_host }}"
+  gather_facts: false
+
+  vars:
+    status_code: 0
+    response_message: "Automation execution is in progress."
+    service_name: "{{ service_name | default('') }}"
+
+  tasks:
+    - name: Run pre execution lifecycle role
+      ansible.builtin.include_role:
+        name: Job_Pre_Execution
+
+    - name: Main automation block
+      block:
+        - name: Validate required parameters
+          ansible.builtin.assert:
+            that:
+              - target_host is defined
+              - target_host | string | length > 0
+              - service_name is defined
+              - service_name | string | length > 0
+            fail_msg: "Required parameter(s) missing. target_host and service_name must be provided."
+            success_msg: "Required parameters validated successfully."
+
+        - name: Update job status - parameter validation completed
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: "Parameter validation completed successfully. Automation is in progress."
+
+        - name: Check Windows service status
+          win_service_info:
+            name: "{{ service_name }}"
+          register: svc_status
+
+        - name: Update job status - service check completed
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: "Service status check completed. Automation is still in progress."
+
+        - name: Set successful resolution status if service exists
+          ansible.builtin.set_fact:
+            status_code: 1
+            response_message: >-
+              {% if svc_status.exists %}
+                Service '{{ service_name }}' exists. Current state is '{{ svc_status.state }}'.
+                Automation completed successfully. The issue has been resolved.
+              {% else %}
+                Service '{{ service_name }}' does not exist on the target host.
+                Automation completed successfully (service not found).
+              {% endif %}
+
+        - name: Update job status - successfully resolved
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
+
+      rescue:
+        - name: Set failed and transferred status
+          ansible.builtin.set_fact:
+            status_code: -1
+            response_message: "Automation execution was not successful. The issue is being transferred for manual review."
+
+        - name: Update job status - execution not successful and transferred
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
+
+      always:
+        - name: Run post execution lifecycle role
+          ansible.builtin.include_role:
+            name: Job_Post_Execution
