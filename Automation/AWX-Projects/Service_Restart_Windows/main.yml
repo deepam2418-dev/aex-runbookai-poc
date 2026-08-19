@@ -37,9 +37,10 @@
             name: "{{ service_name }}"
             state: restarted
 
-        - name: Check Windows service status after restart
-          win_service_info:
+        - name: Query Windows service status after restart
+          win_service:
             name: "{{ service_name }}"
+            state: queried
           register: svc_status
 
         - name: Update job status - major automation step completed
@@ -51,9 +52,9 @@
 
         - name: Set successful resolution status if service is running
           ansible.builtin.set_fact:
-            status_code: "{{ '1' if svc_status.services[0].state == 'running' else '-1' }}"
+            status_code: "{{ '1' if svc_status.status == 'running' else '-1' }}"
             response_message: >
-              {% if svc_status.services[0].state == 'running' %}
+              {% if svc_status.status == 'running' %}
                 Automation completed successfully. Service '{{ service_name }}' is running.
               {% else %}
                 Automation execution was not successful. Service '{{ service_name }}' is not running after restart.
