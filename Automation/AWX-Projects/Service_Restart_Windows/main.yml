@@ -1,0 +1,102 @@
+---
+- name: Service_Restart_Windows
+  hosts: "{{ target_host }}"
+  gather_facts: false
+
+  vars:
+    status_code: 0
+    response_message: "Automation execution is in progress."
+
+  tasks:
+    - name: Run pre execution lifecycle role
+      ansible.builtin.include_role:
+        name: Job_Pre_Execution
+
+    - name: Main automation block
+      block:
+        - name: Validate required parameters
+          ansible.builtin.assert:
+            that:
+              - target_host is defined
+              - target_host | string | length > 0
+              - service_name is defined
+              - service_name | string | length > 0
+            fail_msg: "Required parameters (target_host, service_name) are missing."
+            success_msg: "Required parameters validated successfully."
+
+        - name: Update job status - parameter validation completed
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: "Parameter validation completed successfully. Automation is in progress."
+
+        - name: Check service status
+          win_service_info:
+            name: "{{ service_name }}"
+          register: service_status
+
+        - name: Update job status - service status checked
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: "Service status checked. Proceeding with restart logic if needed."
+
+        - name: Restart service if not running
+          win_service:
+            name: "{{ service_name }}"
+            state: restarted
+          when: service_status.services[0].state != 'running'
+          register: restart_result
+
+        - name: Update job status - service restart attempted (if applicable)
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: >-
+              {% if service_status.services[0].state == 'running' %}
+                Service '{{ service_name }}' was already running. No action taken.
+              {% elif restart_result is defined and restart_result.changed %}
+                Service '{{ service_name }}' was not running and has been restarted.
+              {% else %}
+                Service '{{ service_name }}' was not running but restart did not change state.
+              {% endif %}
+
+        - name: Set successful resolution status
+          ansible.builtin.set_fact:
+            status_code: 1
+            response_message: >-
+              {% if service_status.services[0].state == 'running' %}
+                Automation completed successfully. Service '{{ service_name }}' was already running.
+              {% elif restart_result is defined and restart_result.changed %}
+                Automation completed successfully. Service '{{ service_name }}' was restarted.
+              {% else %}
+                Automation completed. Attempted to restart '{{ service_name }}', verify manually if issue persists.
+              {% endif %}
+
+        - name: Update job status - successfully resolved
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
+
+      rescue:
+        - name: Set failed and transferred status
+          ansible.builtin.set_fact:
+            status_code: -1
+            response_message: "Automation execution was not successful. The issue is being transferred for manual review."
+
+        - name: Update job status - execution not successful and transferred
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
+
+      always:
+        - name: Run post execution lifecycle role
+          ansible.builtin.include_role:
+            name: Job_Post_Execution
