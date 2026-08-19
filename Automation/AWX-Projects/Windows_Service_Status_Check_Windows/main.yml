@@ -31,9 +31,10 @@
             status_code: 0
             response_message: "Parameter validation completed successfully. Automation is in progress."
 
-        - name: Get Windows service status
-          win_service_info:
+        - name: Get Windows service status using win_service
+          ansible.windows.win_service:
             name: "{{ service_name }}"
+            state: queried
           register: svc_status
 
         - name: Update job status - service check completed
@@ -48,7 +49,7 @@
             status_code: "{{ 1 if svc_status.exists else -1 }}"
             response_message: >-
               {% if svc_status.exists %}
-                Service '{{ service_name }}' is present on {{ target_host }}. Current state: {{ svc_status.status }}
+                Service '{{ service_name }}' is present on {{ target_host }}. Current state: {{ svc_status.state }}
               {% else %}
                 Service '{{ service_name }}' not found on {{ target_host }}.
               {% endif %}
