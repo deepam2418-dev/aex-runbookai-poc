@@ -1,0 +1,85 @@
+---
+- name: Linux_Service_Status_Check
+  hosts: "{{ target_host }}"
+  gather_facts: false
+
+  vars:
+    status_code: 0
+    response_message: "Automation execution is in progress."
+
+  tasks:
+    - name: Run pre execution lifecycle role
+      ansible.builtin.include_role:
+        name: Job_Pre_Execution
+
+    - name: Main automation block
+      block:
+        - name: Validate required parameters
+          ansible.builtin.assert:
+            that:
+              - target_host is defined
+              - target_host | string | length > 0
+              - service_name is defined
+              - service_name | string | length > 0
+            fail_msg: "Required parameter(s) missing: target_host and/or service_name."
+            success_msg: "Required parameters validated successfully."
+
+        - name: Update job status - parameter validation completed
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: "Parameter validation completed successfully. Automation is in progress."
+
+        - name: Check service status
+          ansible.builtin.service_facts:
+
+        - name: Set fact for service state
+          ansible.builtin.set_fact:
+            service_state: "{{ ansible_facts.services[service_name].state if service_name in ansible_facts.services else 'not_found' }}"
+
+        - name: Update job status - service checked
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: "Service '{{ service_name }}' status checked. Automation is still in progress."
+
+        - name: Set successful resolution status if running or stopped
+          ansible.builtin.set_fact:
+            status_code: "{{ 1 if service_state in ['running', 'stopped'] else -1 }}"
+            response_message: >-
+              {% if service_state == 'running' %}
+                Service '{{ service_name }}' is running.
+              {% elif service_state == 'stopped' %}
+                Service '{{ service_name }}' is stopped.
+              {% elif service_state == 'not_found' %}
+                Service '{{ service_name }}' not found on the target host.
+              {% else %}
+                Unknown state for service '{{ service_name }}'.
+              {% endif %}
+
+        - name: Update job status - final result
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
+
+      rescue:
+        - name: Set failed and transferred status
+          ansible.builtin.set_fact:
+            status_code: -1
+            response_message: "Automation execution was not successful. The issue is being transferred for manual review."
+
+        - name: Update job status - execution not successful and transferred
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
+
+      always:
+        - name: Run post execution lifecycle role
+          ansible.builtin.include_role:
+            name: Job_Post_Execution
