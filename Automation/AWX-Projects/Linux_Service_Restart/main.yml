@@ -1,0 +1,100 @@
+---
+- name: Linux_Service_Restart
+  hosts: "{{ target_host }}"
+  gather_facts: false
+
+  vars:
+    status_code: 0
+    response_message: "Automation execution is in progress."
+
+  tasks:
+    - name: Run pre execution lifecycle role
+      ansible.builtin.include_role:
+        name: Job_Pre_Execution
+
+    - name: Main automation block
+      block:
+        - name: Validate required parameters
+          ansible.builtin.assert:
+            that:
+              - target_host is defined
+              - target_host | string | length > 0
+              - service_name is defined
+              - service_name | string | length > 0
+            fail_msg: "Required parameter(s) target_host or service_name is missing."
+            success_msg: "Required parameters validated successfully."
+
+        - name: Update job status - parameter validation completed
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: "Parameter validation completed successfully. Automation is in progress."
+
+        - name: Check if the service exists on the target host
+          ansible.builtin.shell: |
+            systemctl status {{ service_name }}
+          register: service_status_check
+          changed_when: false
+          failed_when: false
+
+        - name: Update job status - service existence checked
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: "Service existence check completed. Proceeding to restart if present."
+
+        - name: Restart the service if it exists
+          ansible.builtin.service:
+            name: "{{ service_name }}"
+            state: restarted
+          when: service_status_check.rc == 0
+
+        - name: Update job status - service restart attempted
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: 0
+            response_message: "Service restart attempted. Checking result."
+
+        - name: Verify service is running after restart
+          ansible.builtin.shell: |
+            systemctl is-active {{ service_name }}
+          register: service_active_check
+          changed_when: false
+
+        - name: Set successful resolution status if service is running
+          ansible.builtin.set_fact:
+            status_code: 1
+            response_message: "Automation completed successfully. The {{ service_name }} service was restarted and is running."
+          when: service_active_check.stdout == "active"
+
+        - name: Set transfer status if service failed to start or does not exist
+          ansible.builtin.set_fact:
+            status_code: 2
+            response_message: "Service {{ service_name }} could not be restarted or does not exist. Manual intervention required."
+          when: service_active_check.stdout != "active"
+
+        - name: Update job status - final outcome set
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
+      rescue:
+        - name: Set failed and transferred status due to error in playbook execution
+          ansible.builtin.set_fact:
+            status_code: -1
+            response_message: "Automation execution was not successful. The issue is being transferred for manual review."
+        
+        - name: Update job status - execution not successful and transferred
+          ansible.builtin.include_role:
+            name: Job_Updates
+          vars:
+            status_code: "{{ status_code }}"
+            response_message: "{{ response_message }}"
+      always:
+        - name: Run post execution lifecycle role
+          ansible.builtin.include_role:
+            name: Job_Post_Execution
